@@ -1,4 +1,4 @@
-type ('a, 'e, 'l) t = ('a, 'e) result * 'l
+type ('a, 'e, 'l) t = ('a, 'e) result * 'l list
 
 let return x = (Ok x, [])
 let fail e = (Error e, [])

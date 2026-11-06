@@ -6,6 +6,6 @@
 
 (library
  (name maoLang)
- (modules maoAst maoAst_pp maoLexer maoParser maoTypeChecker maoInterpreter loc utils errorUtils loggerUtils)
+ (modules maoAst maoAst_pp maoLexer maoParser maoTypeChecker maoInterpreter loc resultLogMonad utils errorUtils)
  (modules_without_implementation maoAst)
  (libraries fmt))
