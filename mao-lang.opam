@@ -12,7 +12,9 @@ depends: [
   "dune" {>= "3.24"}
   "ocaml"
   "fmt"
-  "menhir"
+  "menhir" {>= "20180523"}
+  "js_of_ocaml"
+  "wasm_of_ocaml-compiler"
   "ocamlformat" {with-dev-setup & = "0.29.0"}
   "ocaml-lsp-server" {with-dev-setup}
   "odoc" {with-doc}
