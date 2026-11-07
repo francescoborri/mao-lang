@@ -1,0 +1,18 @@
+(ocamllex
+ (modules maoLexer))
+
+(menhir
+ (modules maoParser))
+
+(library
+ (name maoLang)
+ (modules
+  maoLang
+  maoAst
+  maoAst_pp
+  maoLexer
+  maoParser
+  maoTypeChecker
+  maoInterpreter)
+ (modules_without_implementation maoAst)
+ (libraries fmt loc resultLogMonad utils))

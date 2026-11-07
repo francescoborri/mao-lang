@@ -53,7 +53,7 @@ and expr_node =
 
 and command_node =
   | Skip
-  | Declare of typed_var list * expr list
+  | Declare of typed_var list * expr list option
   | Assign of string list * expr list
   | ArrayStore of string * expr * expr
   | Seq of command * command

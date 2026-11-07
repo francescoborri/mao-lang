@@ -1,0 +1,4 @@
+(library
+ (name loc)
+ (modules loc)
+ (libraries fmt))

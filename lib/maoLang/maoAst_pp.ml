@@ -54,6 +54,16 @@ let pp_un_op fmt = function
   | Neg -> Fmt.string fmt "-"
   | Not -> Fmt.string fmt "!"
 
+let pp_decl_lhs fmt ds =
+  match ds with
+  | [] -> unreachable "Declaration must have at least one variable"
+  | x :: [] -> pp_typed_var fmt x
+  | (t, x) :: xs when List.for_all (fun (t', _) -> t = t') xs ->
+      Fmt.pf fmt "%a %a" pp_mao_type t
+        (Fmt.list ~sep:(Fmt.any ", ") Fmt.string)
+        (x :: List.map snd xs)
+  | _ -> Fmt.pf fmt "%a" (Fmt.list ~sep:(Fmt.any ", ") pp_typed_var) ds
+
 let rec pp_expr fmt Loc.{ it = e } =
   let is_atomic = function
     | Var _ | Val _ | ArrayLoad _ | NewArrayDefault _ | NewArrayLiteral _
@@ -62,7 +72,7 @@ let rec pp_expr fmt Loc.{ it = e } =
     | BinOp _ | UnOp _ | Cast _ | Ternary _ -> false
   in
   let pp_inner fmt e =
-    if is_atomic (Loc.item e) then pp_expr fmt e
+    if is_atomic (Loc.get_item e) then pp_expr fmt e
     else Fmt.pf fmt "(%a)" pp_expr e
   in
   match e with
@@ -91,10 +101,9 @@ and pp_command fmt { it = c } =
   let pp_aux fmt c =
     match c with
     | Skip -> Fmt.string fmt "skip;"
-    | Declare (ds, es) ->
-        Fmt.pf fmt "%a = %a;"
-          (Fmt.list ~sep:(Fmt.any "; ") pp_typed_var)
-          ds
+    | Declare (ds, None) -> Fmt.pf fmt "%a;" pp_decl_lhs ds
+    | Declare (ds, Some es) ->
+        Fmt.pf fmt "%a = %a;" pp_decl_lhs ds
           (Fmt.list ~sep:(Fmt.any ", ") pp_expr)
           es
     | Assign (ids, es) ->

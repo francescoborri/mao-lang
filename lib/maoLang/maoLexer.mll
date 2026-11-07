@@ -1,6 +1,14 @@
 {
   open MaoParser
-  exception LexerError of string
+  exception Error of string Loc.t
+
+  let error lexbuf c =
+    raise
+      (Error
+         (Loc.with_positions
+            ~start_pos:(Lexing.lexeme_start_p lexbuf)
+            ~end_pos:(Lexing.lexeme_end_p lexbuf)
+            (Fmt.str "unexpected character '%c'" c)))
 }
 
 let return = '\n' | "\r\n"
@@ -66,6 +74,6 @@ rule read = parse
   | char { CHAR (String.get (Lexing.lexeme lexbuf) 1) }
   | ident { IDENT (Lexing.lexeme lexbuf) }
   | eof { EOF }
-  | _ as c { raise (LexerError (Fmt.str "Unexpected character '%c' at position %d" c (Lexing.lexeme_start lexbuf))) }
+  | _ as c { error lexbuf c }
 
 

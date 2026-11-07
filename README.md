@@ -13,11 +13,11 @@ opam switch create . --deps-only --with-dev-setup
 eval $(opam env)
 ```
 
-Build the project and run it on a sample *mao* program:
+Build the project and run it on a sample *.mao* program:
 
 ```bash
 dune build
-cat sample/dummy.mao | dune exec mao
+cat sample/fib.mao | dune exec mao
 ```
 
 To build and run the web version, run:

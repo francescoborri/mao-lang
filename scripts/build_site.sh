@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+
 # Builds the wasm interpreter and assembles the static site into ./_site
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OCaml interpreter in WebAssembly</title>
+  <title>Mao playground (v1.0)</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -54,15 +54,21 @@
 </head>
 <body>
 <main>
-  <h1>OCaml interpreter in WebAssembly</h1>
-  <p class="lead">The interpreter is written in OCaml, compiled to WebAssembly, and runs entirely in your browser, in a background Web Worker you can cancel.</p>
+  <h1>Mao playground (v1.0)</h1>
+  <p class="lead">A simple, imperative programming language for learning.</p>
 
   <div class="grid">
     <section>
       <label for="src">Program</label>
-      <textarea id="src" spellcheck="false">int x = 0;
-while (x < 10) {
-  x = x + 1;
+      <textarea id="src" spellcheck="false">int n = 8;
+int f0 = 0;
+int f1 = 1;
+int fib = f0;
+while (n > 0) {
+  fib := f1;
+  f1 := f1 + f0;
+  f0 := fib;
+  n := n - 1;
 }
       </textarea>
       <div class="bar">

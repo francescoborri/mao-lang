@@ -1,4 +1,4 @@
 (executable
  (public_name mao)
  (name main)
- (libraries maoLang fmt))
+ (libraries maoLang loc fmt))
