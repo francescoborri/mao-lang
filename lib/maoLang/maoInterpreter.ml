@@ -26,8 +26,9 @@ type rt_val =
   | RTDouble of float
   | RTChar of char
 
+type env = idk_what_to_call_it Env.t
 type mem = rt_val Mem.t
-type log = { event : string; loc : Loc.loc }
+type log = { event : string; env : env; mem : mem; loc : Loc.loc }
 
 let error_with_loc ~loc fmt = Fmt.kstr (Loc.with_loc ~loc >> RLM.error) fmt
 

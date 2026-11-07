@@ -8,9 +8,21 @@ module type Addr = sig
 end
 
 module Mem = struct
-  module Make (Addr : Addr) = struct
+  module type S = sig
+    type addr
+    type 'a t
+
+    val empty : 'a t
+    val alloc : 'a -> 'a t -> 'a t * addr
+    val find_opt : addr -> 'a t -> 'a option
+    val add : addr -> 'a -> 'a t -> 'a t
+    val pp : 'a Fmt.t -> 'a t Fmt.t
+  end
+
+  module Make (Addr : Addr) : S with type addr = Addr.t = struct
     module M = Map.Make (Addr)
 
+    type addr = Addr.t
     type 'a t = { map : 'a M.t; next_addr : Addr.t }
 
     let empty = { map = M.empty; next_addr = Addr.zero }
@@ -23,6 +35,14 @@ module Mem = struct
 
     let add addr v m =
       { map = M.add addr v m.map; next_addr = max m.next_addr (Addr.next addr) }
+
+    let pp pp_v fmt m =
+      let pp_binding fmt (addr, v) =
+        Fmt.pf fmt "%a -> %a" Addr.pp addr pp_v v
+      in
+      Fmt.pf fmt "{@[<v>%a@]}"
+        Fmt.(list ~sep:(any ";@ ") pp_binding)
+        (M.bindings m.map)
   end
 end
 
