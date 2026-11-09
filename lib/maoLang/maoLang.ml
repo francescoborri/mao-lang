@@ -5,6 +5,8 @@ module Parser = MaoParser
 module TypeChecker = MaoTypeChecker
 module Interpreter = MaoInterpreter
 
+type log = Interpreter.log
+
 let run lexbuf =
   let module WRM = WriterResultMonad in
   let open WRM.Syntax in
