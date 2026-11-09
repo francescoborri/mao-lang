@@ -10,6 +10,8 @@ type log = Interpreter.log
 let run lexbuf =
   let module WRM = WriterResultMonad in
   let open WRM.Syntax in
+  WRM.run
+  @@
   let* c_ast =
     try
       let ast = MaoParser.program MaoLexer.read lexbuf in

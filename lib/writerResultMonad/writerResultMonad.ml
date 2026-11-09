@@ -1,15 +1,20 @@
-type ('a, 'e, 'l) t = ('a, 'e) result * 'l list
+type 'l dlist = 'l list -> 'l list
+type ('a, 'e, 'l) t = ('a, 'e) result * 'l dlist
 
-let ok x = (Ok x, [])
-let error e = (Error e, [])
-let tell msg = (Ok (), [ msg ])
+let empty = Fun.id
+let append left right tail = left (right tail)
+let ok x = (Ok x, empty)
+let error e = (Error e, empty)
+let tell msg = (Ok (), fun tail -> msg :: tail)
 
-let bind m f =
-  match m with
-  | Error e, log -> (Error e, log)
-  | Ok x, log ->
-      let r, log' = f x in
-      (r, log @ log')
+let bind (result, log) f =
+  match result with
+  | Error e -> (Error e, log)
+  | Ok x ->
+      let result', log' = f x in
+      (result', append log log')
+
+let run (result, log) = (result, log [])
 
 module Syntax = struct
   let ( let* ) m f = bind m f
