@@ -28,5 +28,12 @@ let with_positions ~start_pos ~end_pos item =
           };
       }
 
-let pp pp fmt { it; at } =
-  Fmt.pf fmt "%a at line %d, column %d" pp it at.start_pos.line at.start_pos.col
+let pp_loc fmt { start_pos } =
+  Fmt.pf fmt "line %d, column %d" start_pos.line start_pos.col
+
+let pp_end_loc fmt { end_pos } =
+  Fmt.pf fmt "line %d, column %d" end_pos.line end_pos.col
+
+let pp_loc_full fmt loc = Fmt.pf fmt "%a - %a" pp_loc loc pp_end_loc loc
+let pp pp fmt { it; at } = Fmt.pf fmt "%a at %a" pp it pp_loc at
+let pp_full pp fmt { it; at } = Fmt.pf fmt "%a at %a" pp it pp_loc_full at

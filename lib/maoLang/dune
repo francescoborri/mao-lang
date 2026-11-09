@@ -15,4 +15,4 @@
   maoTypeChecker
   maoInterpreter)
  (modules_without_implementation maoAst)
- (libraries fmt loc writerResultMonad utils))
+ (libraries fmt loc config writerResultMonad utils))

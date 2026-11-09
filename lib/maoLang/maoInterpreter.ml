@@ -9,7 +9,7 @@ module IntAddr = struct
   let zero = 0
   let next x = x + 1
   let compare = compare
-  let pp = Fmt.int
+  let pp fmt = Fmt.pf fmt "0x%x"
 end
 
 module Mem = Mem.Make (IntAddr)
@@ -17,17 +17,23 @@ module WRM = WriterResultMonad
 
 type idk_what_to_call_it =
   | Addr of IntAddr.t
-  | LambdaFun of typed_var list * expr
-  | LambdaProc of typed_var list * command
+  | LambdaFun of typed_var list * checked_expr
+  | LambdaProc of typed_var list * checked_command
 
 module RTVal = struct
-  type t = Int of int | Bool of bool | Double of float | Char of char
+  type t =
+    | Int of int
+    | Bool of bool
+    | Double of float
+    | Char of char
+    | Addr of IntAddr.t
 
   let type_of = function
     | Int _ -> BaseType IntType
     | Bool _ -> BaseType BoolType
     | Double _ -> BaseType DoubleType
     | Char _ -> BaseType CharType
+    | Addr _ -> unreachable "cannot determine type of address value"
 
   let default_from_type = function
     | IntType -> Int 0
@@ -40,14 +46,18 @@ module RTVal = struct
     | Bool b -> Fmt.pf fmt "%b" b
     | Double d -> Fmt.string fmt (shortest_float_string d)
     | Char c -> Fmt.pf fmt "'%c'" c
+    | Addr addr -> IntAddr.pp fmt addr
 end
 
 type env = idk_what_to_call_it Env.t
 type mem = RTVal.t Mem.t
-type log = { event : string; env : env; mem : mem }
+type log_kind = CmdLog | ExprLog
+type log = { env : env; mem : mem; event : string; descr : string }
 
-let log ~loc event env mem =
-  { event; env; mem } |> Loc.with_loc ~loc |> WRM.tell
+let log ~loc env mem event fmt =
+  Fmt.kstr
+    (fun descr -> { env; mem; event; descr } |> Loc.with_loc ~loc |> WRM.tell)
+    fmt
 
 let undefined_variable_error id = unreachable "undefined variable '%s'" id
 
@@ -80,6 +90,9 @@ let index_out_of_bounds_error ~loc idx arr_len =
 
 let cast_int v cont =
   match v with RTVal.Int i -> WRM.ok i | v -> cont RTVal.(type_of v)
+
+let cast_addr v cont =
+  match v with RTVal.Addr addr -> WRM.ok addr | v -> cont RTVal.(type_of v)
 
 let cast_bool v cont =
   match v with RTVal.Bool b -> WRM.ok b | v -> cont RTVal.(type_of v)
@@ -122,7 +135,7 @@ let alloc_array data mem =
       (fun mem addr datum -> Mem.add addr datum mem)
       mem addrs data
   in
-  (RTVal.Int arr_ptr, mem)
+  (RTVal.Addr arr_ptr, mem)
 
 let eval_bin_op ~e1_loc ~e2_loc op v1 v2 =
   let module V = RTVal in
@@ -190,43 +203,29 @@ let eval_base_val Loc.{ it = v } =
   | DoubleVal d -> RTVal.Double d
   | CharVal c -> RTVal.Char c
 
-let eval_decl ~loc env mem ?(v = None) (t, id) =
-  match (t, v) with
-  | BaseType _, Some v | CompositeType _, Some v ->
-      let* () = log ~loc (Fmt.str "let %s = %a" id RTVal.pp v) env mem in
-      let mem, addr = Mem.alloc v mem in
-      let env = Env.add id (Addr addr) env in
-      WRM.ok (env, mem)
-  | BaseType t, None ->
-      let v = RTVal.default_from_type t in
-      let* () = log ~loc (Fmt.str "let %s = %a" id RTVal.pp v) env mem in
-      let mem, addr = Mem.alloc v mem in
-      let env = Env.add id (Addr addr) env in
-      WRM.ok (env, mem)
-  | CompositeType (Array _), None ->
-      unreachable
-        "array type should not appear in declarations with default values"
-  | FuncType _, _ ->
-      unreachable "function types should not appear in declarations"
+let eval_decl ~loc env mem (t, id) v =
+  let mem, addr = Mem.alloc v mem in
+  let env = Env.add id (Addr addr) env in
+  WRM.ok (env, mem)
 
 let rec eval_expr env mem Loc.{ it = e; at = loc } =
   match e with
-  | Val v -> WRM.ok (eval_base_val v, mem)
-  | Var id ->
+  | CVal v -> WRM.ok (eval_base_val v, mem)
+  | CVar id ->
       let* v = lookup_var ~loc env mem id in
       WRM.ok (v, mem)
-  | BinOp (e1, op, e2) ->
+  | CBinOp (e1, op, e2) ->
       let* v1, mem = eval_expr env mem e1 in
       let* v2, mem = eval_expr env mem e2 in
       let* v = eval_bin_op ~e1_loc:e1.at ~e2_loc:e2.at op v1 v2 in
       WRM.ok (v, mem)
-  | UnOp (op, e) ->
+  | CUnOp (op, e) ->
       let* v, mem = eval_expr env mem e in
       let* v = eval_un_op ~e_loc:e.at op v in
       WRM.ok (v, mem)
-  | ArrayLoad (id, e) ->
+  | CArrayLoad (id, e) ->
       let* arr_ptr = lookup_var ~loc env mem id in
-      let* arr_ptr = cast_int arr_ptr (expected_array_error id) in
+      let* arr_ptr = cast_addr arr_ptr (expected_array_error id) in
       let* idx, mem = eval_expr env mem e in
       let* idx = cast_int idx (type_error (BaseType IntType)) in
       let* arr_len = lookup_addr ~loc mem arr_ptr in
@@ -234,23 +233,27 @@ let rec eval_expr env mem Loc.{ it = e; at = loc } =
       if idx < 0 || idx >= arr_len then
         index_out_of_bounds_error ~loc idx arr_len
       else
-        let* datum = lookup_addr ~loc mem (arr_ptr + idx + 1) in
-        WRM.ok (datum, mem)
-  | NewArrayDefault (t, e) ->
+        let* v = lookup_addr ~loc mem (arr_ptr + idx + 1) in
+        WRM.ok (v, mem)
+  | CNewArrayDefault (t, e) ->
       let* n, mem = eval_expr env mem e in
       let* n = cast_int n (type_error (BaseType IntType)) in
       if n <= 0 then error_with_loc ~loc:e.at "array size must be positive"
       else
         let data = List.init n (fun _ -> RTVal.default_from_type t) in
-        WRM.ok (alloc_array data mem)
-  | NewArrayLiteral vs -> WRM.ok (alloc_array (List.map eval_base_val vs) mem)
-  | ArrayLength id ->
+        let arr_ptr, mem = alloc_array data mem in
+        WRM.ok (arr_ptr, mem)
+  | CNewArrayLiteral vs ->
+      let vs = List.map eval_base_val vs in
+      let arr_ptr, mem = alloc_array vs mem in
+      WRM.ok (arr_ptr, mem)
+  | CArrayLength id ->
       let* arr_ptr = lookup_var ~loc env mem id in
-      let* arr_ptr = cast_int arr_ptr (expected_array_error id) in
+      let* arr_ptr = cast_addr arr_ptr (expected_array_error id) in
       let* arr_len = lookup_addr ~loc mem arr_ptr in
       let* arr_len = cast_int arr_len (expected_array_error id) in
       WRM.ok (RTVal.Int arr_len, mem)
-  | Cast (t, e) ->
+  | CCast (t, e) ->
       let* v, mem = eval_expr env mem e in
       let* v =
         match (t, v) with
@@ -258,116 +261,110 @@ let rec eval_expr env mem Loc.{ it = e; at = loc } =
             WRM.ok (RTVal.Int (int_of_float d))
         | BaseType DoubleType, RTVal.Int i ->
             WRM.ok (RTVal.Double (float_of_int i))
-        | t, v -> cast_error t RTVal.(type_of v)
+        | _ -> cast_error t RTVal.(type_of v)
       in
       WRM.ok (v, mem)
-  | Call (id, args) ->
-      let* params, body = lookup_fun ~loc env id in
-      let decls = Declare (params, Some args) in
-      let* env, mem = eval_command env mem Loc.{ it = decls; at = loc } in
-      eval_expr env mem body
-  | ExprBlock (c, e) ->
+  | CExprBlock (c, e) ->
       let* env, mem = eval_command env mem c in
       eval_expr env mem e
-  | Ternary (e1, e2, e3) ->
+  | CCall (id, args) ->
+      let* params, body = lookup_fun ~loc env id in
+      let decls = Loc.with_loc ~loc (CDeclare (List.combine params args)) in
+      let e = Loc.with_loc ~loc (CExprBlock (decls, body)) in
+      let* () = log ~loc env mem "begin call" "%s(...)" id in
+      let* v, mem = eval_expr env mem e in
+      let* () = log ~loc env mem "end call" "%s(...) -> %a" id RTVal.pp v in
+      WRM.ok (v, mem)
+  | CTernary (e1, e2, e3) ->
       let* v1, mem = eval_expr env mem e1 in
-      let* v1 = cast_bool v1 (type_error (BaseType BoolType)) in
-      if v1 then eval_expr env mem e2 else eval_expr env mem e3
+      let* b = cast_bool v1 (type_error (BaseType BoolType)) in
+      if b then eval_expr env mem e2 else eval_expr env mem e3
 
-and eval_command env mem Loc.{ it = c; at = loc } =
+and eval_command env mem (Loc.{ it = c; at = loc } as c_loc) =
   match c with
-  | Skip ->
-      let* () = log ~loc "skip" env mem in
-      WRM.ok (env, mem)
-  | Declare ([ (t, id) ], None) -> eval_decl ~loc env mem (t, id)
-  | Declare ((t, id) :: ds, None) ->
-      let* env, mem =
-        eval_command env mem Loc.{ it = Declare (ds, None); at = loc }
+  | CSkip -> WRM.ok (env, mem)
+  | CDeclare [ ((t, id), e) ] ->
+      let* v, mem = eval_expr env mem e in
+      let* () =
+        log ~loc env mem "decl" "%a %s = %a" pp_mao_type t id RTVal.pp v
       in
-      eval_decl ~loc env mem (t, id)
-  | Declare ([ (t, id) ], Some [ e ]) ->
+      eval_decl ~loc env mem (t, id) v
+  | CDeclare (((t, id), e) :: rest) ->
       let* v, mem = eval_expr env mem e in
-      eval_decl ~loc env mem ~v:(Some v) (t, id)
-  | Declare ((t, id) :: ds, Some (e :: es)) ->
-      let* v, mem = eval_expr env mem e in
-      let* env, mem =
-        eval_command env mem Loc.{ it = Declare (ds, Some es); at = loc }
+      let rest = Loc.with_loc ~loc (CDeclare rest) in
+      let* env, mem = eval_command env mem rest in
+      let* env, mem = eval_decl ~loc:e.at env mem (t, id) v in
+      let* () =
+        log ~loc env mem "decls" "%a %s = %a" pp_mao_type t id RTVal.pp v
       in
-      let* env, mem = eval_decl ~loc:e.at env mem ~v:(Some v) (t, id) in
       WRM.ok (env, mem)
-  | Declare ([], None) ->
-      unreachable "default declaration with no variables and no values"
-  | Declare ([], Some []) ->
-      unreachable "declaration with no variables and no values"
-  | Declare ([], Some (_ :: _)) | Declare (_ :: _, Some []) ->
-      unreachable "declaration with mismatched number of variables and values"
-  | Assign ([ id ], [ e ]) ->
+  | CDeclare [] -> unreachable "declaration with no variables and no values"
+  | CAssign [ (id, e) ] ->
       let* v, mem = eval_expr env mem e in
-      let* () = log ~loc:e.at (Fmt.str "%s := %a" id RTVal.pp v) env mem in
       let* mem = store_var ~loc env mem id v in
+      let* () = log ~loc env mem "assign" "%s := %a" id RTVal.pp v in
       WRM.ok (env, mem)
-  | Assign (id :: ids, e :: es) ->
+  | CAssign ((id, e) :: res) ->
       let* v, mem = eval_expr env mem e in
-      let* env, mem =
-        eval_command env mem Loc.{ it = Assign (ids, es); at = loc }
-      in
-      let* () = log ~loc:e.at (Fmt.str "%s := %a" id RTVal.pp v) env mem in
+      let rest = Loc.with_loc ~loc (CAssign res) in
+      let* env, mem = eval_command env mem rest in
       let* mem = store_var ~loc env mem id v in
+      let* () = log ~loc env mem "assigns" "%s := %a" id RTVal.pp v in
       WRM.ok (env, mem)
-  | Assign ([], []) -> unreachable "assignment with no variables"
-  | Assign ([], _ :: _) | Assign (_ :: _, []) ->
-      unreachable "assignment with mismatched number of variables and values"
-  | ArrayStore (id, e1, e2) ->
+  | CAssign [] -> unreachable "assignment with no variables"
+  | CArrayStore (id, e1, e2) ->
       let* arr_ptr = lookup_var ~loc env mem id in
-      let* arr_ptr = cast_int arr_ptr (expected_array_error id) in
+      let* arr_ptr = cast_addr arr_ptr (expected_array_error id) in
       let* idx, mem = eval_expr env mem e1 in
       let* idx = cast_int idx (type_error (BaseType IntType)) in
-      let* datum, mem = eval_expr env mem e2 in
+      let* v, mem = eval_expr env mem e2 in
       let* arr_len = lookup_addr ~loc mem arr_ptr in
       let* arr_len = cast_int arr_len (expected_array_error id) in
-      let* () =
-        log ~loc (Fmt.str "%s[%d] := %a" id idx RTVal.pp datum) env mem
-      in
       if idx < 0 || idx >= arr_len then
         index_out_of_bounds_error ~loc idx arr_len
       else
-        let mem = Mem.add (arr_ptr + idx + 1) datum mem in
+        let addr = arr_ptr + idx + 1 in
+        let mem = Mem.add addr v mem in
+        let* () =
+          log ~loc env mem "store" "%s[%d] (mem[%a]) := %a" id idx RTVal.pp
+            (RTVal.Addr addr) RTVal.pp v
+        in
         WRM.ok (env, mem)
-  | Seq (c1, c2) ->
+  | CSeq (c1, c2) ->
       let* env, mem = eval_command env mem c1 in
       eval_command env mem c2
-  | IfThenElse (e, c1, c2) ->
+  | CIfThenElse (e, c1, c2) ->
       let* v, mem = eval_expr env mem e in
-      let* v = cast_bool v (type_error (BaseType BoolType)) in
-      let* () = log ~loc (Fmt.str "if (%b)" v) env mem in
+      let* b = cast_bool v (type_error (BaseType BoolType)) in
+      let* () = log ~loc:e.at env mem "if" "guard is %b" b in
       let* _, mem =
-        if v then eval_command env mem c1 else eval_command env mem c2
+        if b then eval_command env mem c1 else eval_command env mem c2
       in
       WRM.ok (env, mem)
-  | While (e, c) ->
+  | CWhile (e, c) ->
       let* v, mem = eval_expr env mem e in
       let* v = cast_bool v (type_error (BaseType BoolType)) in
-      let* () = log ~loc (Fmt.str "while (%b)" v) env mem in
+      let* () = log ~loc:e.at env mem "while" "guard is %b" v in
       if v then
         let* _, mem = eval_command env mem c in
-        eval_command env mem Loc.{ it = While (e, c); at = loc }
+        eval_command env mem c_loc
       else WRM.ok (env, mem)
-  | Block c ->
+  | CBlock c ->
       let* _, mem = eval_command env mem c in
       WRM.ok (env, mem)
-  | Proc (id, ds, c) ->
-      let* () = log ~loc (Fmt.str "decl proc '%s'" id) env mem in
+  | CProc (id, ds, c) ->
       let env = Env.add id (LambdaProc (ds, c)) env in
       WRM.ok (env, mem)
-  | Invoke (id, args) ->
+  | CInvoke (id, args) ->
       let* params, body = lookup_proc ~loc env id in
-      let decls = Declare (params, Some args) in
-      let* () = log ~loc (Fmt.str "invoke '%s'" id) env mem in
-      let* env', mem = eval_command env mem Loc.{ it = decls; at = loc } in
-      let* _, mem = eval_command env' mem body in
+      let decls = Loc.with_loc ~loc (CDeclare (List.combine params args)) in
+      let body = Loc.with_loc ~loc (CSeq (decls, body)) in
+      let body = Loc.with_loc ~loc (CBlock body) in
+      let* () = log ~loc env mem "begin invoke" "%s(...)" id in
+      let* _, mem = eval_command env mem body in
+      let* () = log ~loc env mem "end invoke" "%s(...)" id in
       WRM.ok (env, mem)
-  | Func (id, ds, t, e) ->
-      let* () = log ~loc (Fmt.str "decl func '%s'" id) env mem in
+  | CFunc (id, ds, t, e) ->
       let env = Env.add id (LambdaFun (ds, e)) env in
       WRM.ok (env, mem)
 

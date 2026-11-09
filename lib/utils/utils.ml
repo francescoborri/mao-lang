@@ -54,7 +54,7 @@ let id x = x
 let ( >> ) f g x = g (f x)
 let unreachable fmt = Fmt.kstr (fun msg -> raise (Unreachable msg)) fmt
 
-let result_foldM f acc lst =
+let result_fold_leftM f acc lst =
   let rec aux acc lst =
     match lst with
     | [] -> Result.ok acc
@@ -62,6 +62,18 @@ let result_foldM f acc lst =
         match f acc x with Error e -> Result.error e | Ok acc' -> aux acc' xs)
   in
   aux acc lst
+
+let result_fold_left2M f acc lst1 lst2 =
+  let rec aux acc lst1 lst2 =
+    match (lst1, lst2) with
+    | [], [] -> Result.ok acc
+    | x :: xs, y :: ys -> (
+        match f acc x y with
+        | Error e -> Result.error e
+        | Ok acc' -> aux acc' xs ys)
+    | _ -> failwith "result_fold_left2M: lists have different lengths"
+  in
+  aux acc lst1 lst2
 
 let shortest_float_string f =
   let rec go p =

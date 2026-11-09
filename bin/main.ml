@@ -1,14 +1,48 @@
+let pp_table fmt logs =
+  if logs = [] then Fmt.pf fmt ""
+  else
+    let headers = [ "index"; "event"; "descr"; "from"; "to" ] in
+    let cells =
+      List.mapi
+        (fun i Loc.{ it = MaoLang.Interpreter.{ event; descr }; at = loc } ->
+          [
+            string_of_int i;
+            event;
+            descr;
+            Fmt.to_to_string Loc.pp_loc loc;
+            Fmt.to_to_string Loc.pp_end_loc loc;
+          ])
+        logs
+    in
+    let columns =
+      List.init (List.length headers) (fun i ->
+          List.map (fun row -> List.nth row i) cells)
+    in
+    let widths =
+      List.map2
+        (fun header column ->
+          List.fold_left
+            (fun width cell -> max width (String.length cell))
+            (String.length header) column)
+        headers columns
+    in
+    let print_row values =
+      List.iter2
+        (fun width value -> Fmt.pf fmt "| %-*s " width value)
+        widths values;
+      Fmt.pf fmt "|@."
+    in
+    print_row headers;
+    List.iter
+      (fun width -> Fmt.pf fmt "|%s" (String.make (width + 2) '-'))
+      widths;
+    Fmt.pf fmt "|@.";
+    List.iter print_row cells
+
 let () =
   let lexbuf = Lexing.from_channel stdin in
   let res, logs = MaoLang.run lexbuf in
-  let logs = List.mapi (fun i log -> (i, log)) logs in
-  let pp_log fmt log = Fmt.pf fmt "%s" log.MaoLang.Interpreter.event in
-  let pp_log fmt (i, log) = Fmt.pf fmt "#%d: %a" (i + 1) (Loc.pp pp_log) log in
-  Fmt.pr "%a%a"
-    Fmt.(list ~sep:(any "@.") pp_log)
-    logs
-    (if List.is_empty logs then Fmt.nop else Fmt.cut)
-    ();
+  Fmt.pr "%a" pp_table logs;
   match res with
-  | Ok _ -> Fmt.pr "Program executed successfully.@."
-  | Error located_msg -> Fmt.pr "%a@." (Loc.pp Fmt.string) located_msg
+  | Ok _ -> ()
+  | Error located_msg -> Fmt.epr "%a@." (Loc.pp Fmt.string) located_msg

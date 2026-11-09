@@ -76,8 +76,8 @@ atom_expr:
   | t = mao_type ; LPAREN ; e = expr ; RPAREN
     { Cast (t, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | LBRACE ; RETURN ; e = expr ; SEMICOLON ; RBRACE { e }
-  | LBRACE ; c = command ; RETURN ; e = expr SEMICOLON ; RBRACE
-    { ExprBlock (c, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
+  | LBRACE ; cs = commands ; RETURN ; e = expr SEMICOLON ; RBRACE
+    { ExprBlock (cs, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | LPAREN ; e1 = expr ; QUESTION_MARK ; e2 = expr ; COLON ; e3 = expr ; RPAREN
     { Ternary (e1, e2, e3) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | LPAREN ; e = expr ; RPAREN { e }
@@ -118,7 +118,7 @@ expr:
   | a = atom_expr { a }
 
 decl_lhs:
-  | d = typed_var { [d] }
+  | d = typed_var { [ d ] }
   | d = typed_var ; COMMA ; ds = separated_nonempty_list(COMMA, typed_var) { d :: ds }
   | d = typed_var ; COMMA ; ids = separated_nonempty_list(COMMA, IDENT)
     { d :: List.map (fun id -> (fst d, id)) ids }

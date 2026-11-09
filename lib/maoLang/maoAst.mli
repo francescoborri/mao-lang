@@ -63,3 +63,33 @@ and command_node =
   | Proc of string * typed_var list * command
   | Invoke of string * expr list
   | Func of string * typed_var list * mao_type * expr
+
+type checked_expr = checked_expr_node Loc.t
+and checked_command = checked_command_node Loc.t
+
+and checked_expr_node =
+  | CVal of base_val
+  | CVar of string
+  | CBinOp of checked_expr * bin_op * checked_expr
+  | CUnOp of un_op * checked_expr
+  | CArrayLoad of string * checked_expr
+  | CNewArrayDefault of base_type * checked_expr
+  | CNewArrayLiteral of base_val list
+  | CArrayLength of string
+  | CCast of mao_type * checked_expr
+  | CCall of string * checked_expr list
+  | CExprBlock of checked_command * checked_expr
+  | CTernary of checked_expr * checked_expr * checked_expr
+
+and checked_command_node =
+  | CSkip
+  | CDeclare of (typed_var * checked_expr) list
+  | CAssign of (string * checked_expr) list
+  | CArrayStore of string * checked_expr * checked_expr
+  | CSeq of checked_command * checked_command
+  | CIfThenElse of checked_expr * checked_command * checked_command
+  | CWhile of checked_expr * checked_command
+  | CBlock of checked_command
+  | CProc of string * typed_var list * checked_command
+  | CInvoke of string * checked_expr list
+  | CFunc of string * typed_var list * mao_type * checked_expr
