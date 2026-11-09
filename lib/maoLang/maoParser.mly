@@ -75,6 +75,7 @@ atom_expr:
     { NewArrayLiteral vs |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | t = mao_type ; LPAREN ; e = expr ; RPAREN
     { Cast (t, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
+  | LBRACE ; RETURN ; e = expr ; SEMICOLON ; RBRACE { e }
   | LBRACE ; c = command ; RETURN ; e = expr SEMICOLON ; RBRACE
     { ExprBlock (c, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | LPAREN ; e1 = expr ; QUESTION_MARK ; e2 = expr ; COLON ; e3 = expr ; RPAREN
