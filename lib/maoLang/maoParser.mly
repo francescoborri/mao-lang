@@ -149,9 +149,9 @@ command:
     { Proc (id, [], cs) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | id = IDENT ; LPAREN ; RPAREN ; SEMICOLON
     { Invoke (id, []) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | id = IDENT ; LPAREN ; ds = separated_nonempty_list(COMMA, typed_var) ; RPAREN ; LBRACE ; cs = commands ; RBRACE
+  | id = IDENT ; LPAREN ; ds = decl_lhs ; RPAREN ; LBRACE ; cs = commands ; RBRACE
     { Proc (id, ds, cs) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | id = IDENT ; LPAREN ; es = separated_nonempty_list(COMMA, expr) ; RPAREN ; SEMICOLON
     { Invoke (id, es) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | t = mao_type ; id = IDENT ; LPAREN ; ds = separated_list(COMMA, typed_var) ; RPAREN ; e = expr
+  | t = mao_type ; id = IDENT ; LPAREN ; ds = decl_lhs ; RPAREN ; e = expr
     { Func (id, ds, t, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
