@@ -22,7 +22,7 @@ jobs:
 
       - uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: "5.2"
+          ocaml-compiler: "5.4"
 
       # wasm_of_ocaml needs binaryen >= 119; opam installs it as a dependency.
       - name: Install dependencies

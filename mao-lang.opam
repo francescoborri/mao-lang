@@ -10,7 +10,7 @@ doc: "https://github.com/francescoborri/mao-lang"
 bug-reports: "https://github.com/francescoborri/mao-lang/issues"
 depends: [
   "dune" {>= "3.24"}
-  "ocaml"
+  "ocaml" {>= "5.4"}
   "fmt"
   "menhir" {>= "20180523"}
   "js_of_ocaml"

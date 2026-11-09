@@ -22,7 +22,7 @@
  (synopsis "A short synopsis")
  (description "A longer description")
  (depends
-  ocaml
+  (ocaml (>= 5.4))
   fmt
   menhir
   js_of_ocaml
