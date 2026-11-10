@@ -27,28 +27,29 @@ let type_check lexbuf =
 let run lexbuf =
   let module WRM = WriterResultMonad in
   let open WRM.Syntax in
-  WRM.run
-  @@
-  let* c_ast =
-    try
-      let ast = MaoParser.program MaoLexer.read lexbuf in
-      match MaoTypeChecker.type_check_program ast with
-      | Ok c_ast -> WRM.ok c_ast
-      | Error msg -> msg |> Loc.map_item (Fmt.str "Type error: %s") |> WRM.error
-    with
-    | MaoLexer.Error msg ->
-        msg |> Loc.map_item (Fmt.str "Lexer error: %s") |> WRM.error
-    | MaoParser.Error ->
-        let pos = lexbuf.Lexing.lex_curr_p in
-        "Parse error"
-        |> Loc.with_positions ~start_pos:pos ~end_pos:pos
-        |> WRM.error
-  in
-  try
+  let m =
+    let* c_ast =
+      try
+        let ast = MaoParser.program MaoLexer.read lexbuf in
+        match MaoTypeChecker.type_check_program ast with
+        | Ok c_ast -> WRM.ok c_ast
+        | Error msg ->
+            msg |> Loc.map_item (Fmt.str "Type error: %s") |> WRM.error
+      with
+      | MaoLexer.Error msg ->
+          msg |> Loc.map_item (Fmt.str "Lexer error: %s") |> WRM.error
+      | MaoParser.Error ->
+          let pos = lexbuf.Lexing.lex_curr_p in
+          "Parse error"
+          |> Loc.with_positions ~start_pos:pos ~end_pos:pos
+          |> WRM.error
+    in
     MaoInterpreter.run_program c_ast
     =&> Loc.map_item (Fmt.str "Runtime error: %s")
+  in
+  try WRM.run m
   with Utils.Unreachable msg ->
     msg
     |> Fmt.str "Unreachable code reached: %s"
     |> Loc.with_loc ~loc:Loc.dummy_loc
-    |> WRM.error
+    |> WRM.error |> WRM.run
