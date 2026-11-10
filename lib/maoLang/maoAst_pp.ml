@@ -1,7 +1,7 @@
 open MaoAst
 open Utils
 
-let pp_block pp fmt x = Fmt.pf fmt "{@;<0 2>@[<v>%a@]@;<0 0>}" pp x
+let pp_block pp fmt x = Fmt.pf fmt "{@;<0 4>@[<v>%a@]@;<0 0>}" pp x
 let pp_wrapper pp = Fmt.vbox pp
 
 let pp_base_type fmt = function
@@ -83,6 +83,13 @@ let rec pp_expr fmt Loc.{ it = e } =
   | UnOp (op, e) -> Fmt.pf fmt "%a%a" pp_un_op op pp_inner e
   | ArrayLoad (id, e) -> Fmt.pf fmt "%s[%a]" id pp_expr e
   | NewArrayDefault (t, e) -> Fmt.pf fmt "new %a[%a]" pp_base_type t pp_expr e
+  | NewArrayLiteral ({ it = CharVal c } :: _ as cs) ->
+      let pp_base_val fmt Loc.{ it = c } =
+        match c with
+        | CharVal c -> Fmt.pf fmt "%c" c
+        | _ -> unreachable "expected a char"
+      in
+      Fmt.pf fmt "\"%a\"" Fmt.(list ~sep:nop pp_base_val) cs
   | NewArrayLiteral vs ->
       Fmt.pf fmt "[%a]" (Fmt.list ~sep:(Fmt.any ", ") pp_base_val) vs
   | ArrayLength id -> Fmt.pf fmt "%s.length" id
@@ -113,7 +120,7 @@ and pp_command fmt { it = c } =
           (Fmt.list ~sep:(Fmt.any ", ") pp_expr)
           es
     | ArrayStore (id, e1, e2) ->
-        Fmt.pf fmt "%s[%a] = %a;" id pp_expr e1 pp_expr e2
+        Fmt.pf fmt "%s[%a] := %a;" id pp_expr e1 pp_expr e2
     | Seq (c1, c2) -> Fmt.pf fmt "%a@,%a" pp_command c1 pp_command c2
     | IfThenElse (e, c1, c2) ->
         Fmt.pf fmt "if (%a) %a else %a" pp_expr e (pp_block pp_command) c1

@@ -1,5 +1,6 @@
 open MaoAst
 open MaoAst_pp
+open MaoDataStructure
 open Utils
 open Result.Syntax
 
@@ -46,21 +47,27 @@ let check_bin_op ~e1_loc ~e2_loc op t1 t2 =
       type_error ~loc:e2_loc (BaseType BoolType) wrong
   | (And | Or | Xor), wrong, _ ->
       type_error ~loc:e1_loc (BaseType BoolType) wrong
-  | (Eq | Neq | Lt | Gt | Leq | Geq), BaseType IntType, BaseType IntType ->
-      Result.ok (BaseType BoolType)
+  | (Eq | Neq | Lt | Gt | Leq | Geq), BaseType IntType, BaseType IntType
   | (Eq | Neq | Lt | Gt | Leq | Geq), BaseType DoubleType, BaseType DoubleType
-    ->
+  | (Eq | Neq | Lt | Gt | Leq | Geq), BaseType CharType, BaseType CharType ->
+      Result.ok (BaseType BoolType)
+  | (Eq | Neq), BaseType BoolType, BaseType BoolType ->
       Result.ok (BaseType BoolType)
   | (Eq | Neq | Lt | Gt | Leq | Geq), BaseType IntType, wrong ->
       type_error ~loc:e2_loc (BaseType IntType) wrong
   | (Eq | Neq | Lt | Gt | Leq | Geq), BaseType DoubleType, wrong ->
       type_error ~loc:e2_loc (BaseType DoubleType) wrong
+  | (Eq | Neq), BaseType BoolType, wrong ->
+      type_error ~loc:e2_loc (BaseType BoolType) wrong
+  | (Eq | Neq | Lt | Gt | Leq | Geq), BaseType CharType, wrong ->
+      type_error ~loc:e2_loc (BaseType CharType) wrong
   | (Eq | Neq | Lt | Gt | Leq | Geq), wrong, _ ->
       type_error ~loc:e1_loc (BaseType IntType) wrong
 
 let check_un_op ~e_loc op t =
   match (op, t) with
   | Neg, BaseType IntType -> Result.ok (BaseType IntType)
+  | Neg, BaseType DoubleType -> Result.ok (BaseType DoubleType)
   | Not, BaseType BoolType -> Result.ok (BaseType BoolType)
   | Neg, wrong -> type_error ~loc:e_loc (BaseType IntType) wrong
   | Not, wrong -> type_error ~loc:e_loc (BaseType BoolType) wrong
@@ -89,17 +96,17 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
       let* t' = check_un_op ~e_loc:e.at op t in
       Result.ok (t', Loc.with_loc ~loc (CUnOp (op, c_e)))
   | ArrayLoad (id, e) -> (
-      let* () =
+      let* t =
         match Env.find_opt id env with
-        | Some (CompositeType (Array _)) -> Result.ok ()
+        | Some (CompositeType (Array t)) -> Result.ok (BaseType t)
         | Some t -> expected_array_error ~loc id t
         | None -> undefined_variable_error ~loc id
       in
-      let* t, c_e = type_check_expr env e in
-      match t with
+      let* t', c_e = type_check_expr env e in
+      match t' with
       | BaseType IntType ->
           Result.ok (t, Loc.with_loc ~loc (CArrayLoad (id, c_e)))
-      | _ -> type_error ~loc (BaseType IntType) t)
+      | _ -> type_error ~loc (BaseType IntType) t')
   | NewArrayDefault (t, e) ->
       let* t', c_e = type_check_expr env e in
       let* () =
@@ -260,12 +267,11 @@ and type_check_command env { it = c; at = loc } =
       let* _, c_c = type_check_command env c in
       Result.ok (env, Loc.with_loc ~loc (CBlock c_c))
   | Proc (id, ds, c) ->
-      let env' = Env.add id (FuncType (List.map fst ds, None)) env in
-      let env'' =
-        List.fold_left (fun acc (t, id) -> Env.add id t acc) env' ds
-      in
-      let* _, c_c = type_check_command env'' c in
-      Result.ok (env', Loc.with_loc ~loc (CProc (id, ds, c_c)))
+      let env' = Env.add id (FuncType (List.map fst ds, None)) Env.empty in
+      let env' = List.fold_left (fun acc (t, id) -> Env.add id t acc) env' ds in
+      let* _, c_c = type_check_command env' c in
+      let env = Env.add id (FuncType (List.map fst ds, None)) env in
+      Result.ok (env, Loc.with_loc ~loc (CProc (id, ds, c_c)))
   | Invoke (id, es) -> (
       match Env.find_opt id env with
       | Some (FuncType (ts, None)) ->
@@ -288,14 +294,14 @@ and type_check_command env { it = c; at = loc } =
             pp_mao_type t
       | None -> undefined_variable_error ~loc id)
   | Func (id, ds, t, e) ->
-      let env' = Env.add id (FuncType (List.map fst ds, Some t)) env in
-      let env'' =
-        List.fold_left (fun acc (t, id) -> Env.add id t acc) env' ds
-      in
-      let* t', c_e = type_check_expr env'' e in
-      if t = t' then Result.ok (env', Loc.with_loc ~loc (CFunc (id, ds, t, c_e)))
+      let env' = Env.add id (FuncType (List.map fst ds, Some t)) Env.empty in
+      let env' = List.fold_left (fun acc (t, id) -> Env.add id t acc) env' ds in
+      let* t', c_e = type_check_expr env' e in
+      if t = t' then
+        let env = Env.add id (FuncType (List.map fst ds, Some t)) env in
+        Result.ok (env, Loc.with_loc ~loc (CFunc (id, ds, t, c_e)))
       else type_error ~loc:e.at t t'
 
 let type_check_program ast =
-  let+ _, c_ast = type_check_command Utils.Env.empty ast in
+  let+ _, c_ast = type_check_command Env.empty ast in
   c_ast

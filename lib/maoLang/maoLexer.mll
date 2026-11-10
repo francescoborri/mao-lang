@@ -19,6 +19,7 @@ let int = digit+
 let bool = "true" | "false"
 let double = digit+ '.' digit+ | digit+ '.' | '.' digit+
 let char = '\'' ['a'-'z' 'A'-'Z' '0'-'9'] '\''
+let string = ([' '-'~'] | '\n' | '\t')*
 let ident = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
 rule read = parse
@@ -72,6 +73,7 @@ rule read = parse
   | bool { BOOL (bool_of_string (Lexing.lexeme lexbuf)) }
   | double { DOUBLE (float_of_string (Lexing.lexeme lexbuf)) }
   | char { CHAR (String.get (Lexing.lexeme lexbuf) 1) }
+  | '"' (string as s) '"' { STRING s }
   | ident { IDENT (Lexing.lexeme lexbuf) }
   | eof { EOF }
   | _ as c { error lexbuf c }

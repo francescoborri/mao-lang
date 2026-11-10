@@ -10,9 +10,11 @@
   maoLang
   maoAst
   maoAst_pp
+  maoDataStructure
+  maoDataStructure_pp
   maoLexer
   maoParser
   maoTypeChecker
   maoInterpreter)
  (modules_without_implementation maoAst)
- (libraries fmt loc config writerResultMonad utils))
+ (libraries fmt loc writerResultMonad utils))

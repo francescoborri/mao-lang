@@ -4,6 +4,8 @@ type pos = { line : int; col : int; offset : int }
 type loc = { start_pos : pos; end_pos : pos }
 type 'a t = { it : 'a; at : loc }
 
+let dummy_pos = { line = 0; col = 0; offset = 0 }
+let dummy_loc = { start_pos = dummy_pos; end_pos = dummy_pos }
 let get_item { it; _ } = it
 let get_loc { at; _ } = at
 let map_item f { it; at } = { it = f it; at }

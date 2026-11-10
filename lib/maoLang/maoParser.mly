@@ -1,13 +1,18 @@
 %{
   open MaoAst
   open Utils
+
+  let unpack_string ~start_pos ~end_pos s =
+    String.to_seq s |> List.of_seq
+    |> List.map (fun c -> Loc.with_positions ~start_pos ~end_pos (CharVal c))
 %}
 
 %token <string> IDENT
-%token <char> CHAR
 %token <int> INT
 %token <float> DOUBLE
 %token <bool> BOOL
+%token <char> CHAR
+%token <string> STRING
 
 %token INT_TYPE BOOL_TYPE DOUBLE_TYPE CHAR_TYPE
 
@@ -73,6 +78,9 @@ atom_expr:
     { NewArrayDefault (t, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | LBRACKET ; vs = separated_nonempty_list(COMMA, base_val) ; RBRACKET
     { NewArrayLiteral vs |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
+  | s = STRING
+    { NewArrayLiteral (unpack_string ~start_pos:$startpos ~end_pos:$endpos s)
+      |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | t = mao_type ; LPAREN ; e = expr ; RPAREN
     { Cast (t, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | LBRACE ; RETURN ; e = expr ; SEMICOLON ; RBRACE { e }
@@ -141,6 +149,9 @@ command:
     { ArrayStore (id, e1, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | IF ; LPAREN ; e = expr ; RPAREN ; LBRACE ; cs1 = commands ; RBRACE ; ELSE ; LBRACE ; cs2 = commands ; RBRACE
     { IfThenElse (e, cs1, cs2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
+  | IF ; LPAREN ; e = expr ; RPAREN ; LBRACE ; cs = commands ; RBRACE
+    { IfThenElse (e, cs, Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos Skip)
+      |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | WHILE ; LPAREN ; e = expr ; RPAREN ; LBRACE ; cs = commands RBRACE
     { While (e, cs) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
   | LBRACE ; cs = commands ; RBRACE
