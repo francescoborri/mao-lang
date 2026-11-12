@@ -2,13 +2,21 @@
   open MaoParser
   exception Error of string Loc.t
 
-  let error lexbuf c =
+  let unexpected_char_error lexbuf c =
     raise
       (Error
          (Loc.with_positions
             ~start_pos:(Lexing.lexeme_start_p lexbuf)
             ~end_pos:(Lexing.lexeme_end_p lexbuf)
             (Fmt.str "unexpected character '%c'" c)))
+
+  let unterminated_comment_error lexbuf =
+    raise
+      (Error
+         (Loc.with_positions
+            ~start_pos:(Lexing.lexeme_start_p lexbuf)
+            ~end_pos:(Lexing.lexeme_end_p lexbuf)
+            (Fmt.str "unterminated block comment")))
 }
 
 let return = '\n' | "\r\n"
@@ -22,10 +30,16 @@ let char = '\'' ['a'-'z' 'A'-'Z' '0'-'9'] '\''
 let string = ([' '-'~'] | '\n' | '\t')*
 let ident = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
+let line_comment = "//" [^ '\n' '\r']*
+let open_multiline_comment = "/*"
+let close_multiline_comment = "*/"
+
 rule read = parse
-  (* Blank characters *)
+  (* Blank characters and comments *)
   | return { Lexing.new_line lexbuf; read lexbuf }
   | white { read lexbuf }
+  | line_comment { read lexbuf }
+  | open_multiline_comment { comment lexbuf; read lexbuf }
   (* Operators and symbols *)
   | "+" { PLUS }
   | "-" { MINUS }
@@ -76,6 +90,12 @@ rule read = parse
   | '"' (string as s) '"' { STRING s }
   | ident { IDENT (Lexing.lexeme lexbuf) }
   | eof { EOF }
-  | _ as c { error lexbuf c }
+  | _ as c { unexpected_char_error lexbuf c }
+
+and comment = parse
+  | close_multiline_comment { () }
+  | return { Lexing.new_line lexbuf; comment lexbuf }
+  | eof { unterminated_comment_error lexbuf }
+  | _ { comment lexbuf }
 
 

@@ -125,8 +125,8 @@ let eval_bin_op Loc.{ it = v1; at = v1_loc } op Loc.{ it = v2; at = v2_loc } =
   | (Add | Sub | Mul | Div | Mod), V.Double _, v ->
       type_error (BaseType DoubleType) v
   | (Add | Sub | Mul | Div | Mod), v, _ -> type_error (BaseType IntType) v
-  | And, V.Bool b1, V.Bool b2 -> WRM.ok (V.Bool (b1 && b2))
-  | Or, V.Bool b1, V.Bool b2 -> WRM.ok (V.Bool (b1 || b2))
+  | And, V.Bool b1, V.Bool b2 -> WRM.ok (V.Bool (if b1 then b2 else false))
+  | Or, V.Bool b1, V.Bool b2 -> WRM.ok (V.Bool (if b1 then true else b2))
   | Xor, V.Bool b1, V.Bool b2 -> WRM.ok (V.Bool (b1 <> b2))
   | (And | Or | Xor), V.Bool _, v -> type_error (BaseType BoolType) v
   | (And | Or | Xor), _, v -> type_error (BaseType BoolType) v
