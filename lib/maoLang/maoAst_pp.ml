@@ -67,9 +67,9 @@ let pp_decl_lhs fmt ds =
 let rec pp_expr fmt Loc.{ it = e } =
   let is_atomic = function
     | Var _ | Val _ | ArrayLoad _ | NewArrayDefault _ | NewArrayLiteral _
-    | ArrayLength _ | Call _ | ExprBlock _ ->
+    | ArrayLength _ | Call _ | ExprBlock _ | Ternary _ ->
         true
-    | BinOp _ | UnOp _ | Cast _ | Ternary _ -> false
+    | BinOp _ | UnOp _ | Cast _  -> false
   in
   let pp_inner fmt e =
     if is_atomic (Loc.get_item e) then pp_expr fmt e
@@ -102,7 +102,7 @@ let rec pp_expr fmt Loc.{ it = e } =
       in
       (pp_block pp_expr_block) fmt (c, e)
   | Ternary (e1, e2, e3) ->
-      Fmt.pf fmt "(%a ? %a : %a)" pp_inner e1 pp_inner e2 pp_inner e3
+      Fmt.pf fmt "(%a ? %a : %a)" pp_expr e1 pp_expr e2 pp_expr e3
 
 and pp_command fmt { it = c } =
   let pp_aux fmt c =
@@ -122,6 +122,8 @@ and pp_command fmt { it = c } =
     | ArrayStore (id, e1, e2) ->
         Fmt.pf fmt "%s[%a] := %a;" id pp_expr e1 pp_expr e2
     | Seq (c1, c2) -> Fmt.pf fmt "%a@,%a" pp_command c1 pp_command c2
+    | IfThenElse (e, c1, Loc.{ it = Skip }) ->
+        Fmt.pf fmt "if (%a) %a" pp_expr e pp_command c1
     | IfThenElse (e, c1, c2) ->
         Fmt.pf fmt "if (%a) %a else %a" pp_expr e (pp_block pp_command) c1
           (pp_block pp_command) c2
