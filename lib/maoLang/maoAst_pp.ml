@@ -123,7 +123,7 @@ and pp_command fmt { it = c } =
         Fmt.pf fmt "%s[%a] := %a;" id pp_expr e1 pp_expr e2
     | Seq (c1, c2) -> Fmt.pf fmt "%a@,%a" pp_command c1 pp_command c2
     | IfThenElse (e, c1, Loc.{ it = Skip }) ->
-        Fmt.pf fmt "if (%a) %a" pp_expr e pp_command c1
+        Fmt.pf fmt "if (%a) %a" pp_expr e (pp_block pp_command) c1
     | IfThenElse (e, c1, c2) ->
         Fmt.pf fmt "if (%a) %a else %a" pp_expr e (pp_block pp_command) c1
           (pp_block pp_command) c2
