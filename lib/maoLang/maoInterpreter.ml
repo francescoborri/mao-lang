@@ -6,7 +6,6 @@ open Utils
 
 module WRM = WriterResultMonad
 
-let wrm_log ~loc state event = { state; event } |> Loc.with_loc ~loc |> WRM.tell
 let undefined_variable_error id = unreachable "undefined variable '%s'" id
 
 let type_error t v =
@@ -30,6 +29,17 @@ let undefined_memory_error addr =
   unreachable "undefined memory at address '%a'" IntAddr.pp addr
 
 let error_with_loc ~loc fmt = Fmt.kstr (Loc.with_loc ~loc >> WRM.error) fmt
+
+(* Maximum number of log entries; reaching it stops the execution with a
+   regular runtime error, so the logs produced so far are kept. *)
+let log_limit = ref max_int
+
+let wrm_log ~loc state event =
+  let* n = WRM.get_log_id () in
+  if n >= !log_limit then
+    error_with_loc ~loc "execution stopped: log limit (%d entries) reached"
+      !log_limit
+  else { state; event } |> Loc.with_loc ~loc |> WRM.tell
 let division_by_zero_error ~loc = error_with_loc ~loc "division by zero"
 
 let index_out_of_bounds_error ~loc idx arr_len =
@@ -226,10 +236,10 @@ let rec eval_expr Loc.{ it = e; at = loc } s =
       let params, body = lookup_fun id s.env in
       let decls = Loc.with_loc ~loc (CDeclare (List.combine params args)) in
       let e = Loc.with_loc ~loc (CExprBlock (decls, body)) in
-      let* log_id = WRM.get_log_id () in
-      let* () = wrm_log ~loc s (EBeginCall (id, log_id)) in
+      let* call_id = WRM.incr_call_id () in
+      let* () = wrm_log ~loc s (EBeginCall (id, call_id)) in
       let* v, s = eval_expr e s =>> set_mem_snd s in
-      let* () = wrm_log ~loc s (EEndCall (id, log_id, v)) in
+      let* () = wrm_log ~loc s (EEndCall (id, call_id, v)) in
       WRM.ok (v, s.mem)
   | CTernary (e1, e2, e3) ->
       let* v1, s = eval_expr e1 s =>> set_mem_snd s in
@@ -301,14 +311,17 @@ and eval_command (Loc.{ it = c; at = loc } as c_with_loc) s =
       let decls = Loc.with_loc ~loc (CDeclare (List.combine params args)) in
       let body = Loc.with_loc ~loc (CSeq (decls, body)) in
       let body = Loc.with_loc ~loc (CBlock body) in
-      let* log_id = WRM.get_log_id () in
-      let* () = wrm_log ~loc s (EBeginInvoke (id, log_id)) in
+      let* call_id = WRM.incr_call_id () in
+      let* () = wrm_log ~loc s (EBeginInvoke (id, call_id)) in
       let* s = eval_command body s =>> replace_mem s in
-      let* () = wrm_log ~loc s (EEndInvoke (id, log_id)) in
+      let* () = wrm_log ~loc s (EEndInvoke (id, call_id)) in
       WRM.ok s
   | CFunc (id, ds, t, e) ->
       let s = Env.add id (LambdaFun (ds, e)) s.env |> set_env s in
       let* () = wrm_log ~loc s (EFunc id) in
       WRM.ok s
 
-let run_program c = eval_command c { env = Env.empty; mem = Mem.empty }
+let run_program ?(max_logs = max_int) c st =
+  log_limit := max_logs;
+  eval_command c { env = Env.empty; mem = Mem.empty } st
+

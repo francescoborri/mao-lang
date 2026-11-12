@@ -6,16 +6,10 @@ module Lexer = MaoLexer
 module Parser = MaoParser
 module TypeChecker = MaoTypeChecker
 module Interpreter = MaoInterpreter
+module Trace = MaoTrace
 
-let type_check lexbuf =
-  let open Result.Syntax in
-  try
-    let ast = MaoParser.program MaoLexer.read lexbuf in
-    match MaoTypeChecker.type_check_program ast with
-    | Ok _ -> Result.ok ast
-    | Error msg ->
-        msg |> Loc.map_item (Fmt.str "Type error: %s") |> Result.error
-  with
+let parse lexbuf =
+  try Result.ok (MaoParser.program MaoLexer.read lexbuf) with
   | MaoLexer.Error msg ->
       msg |> Loc.map_item (Fmt.str "Lexer error: %s") |> Result.error
   | MaoParser.Error ->
@@ -24,7 +18,14 @@ let type_check lexbuf =
       |> Loc.with_positions ~start_pos:pos ~end_pos:pos
       |> Result.error
 
-let run lexbuf =
+let type_check lexbuf =
+  let open Result.Syntax in
+  let* ast = parse lexbuf in
+  match MaoTypeChecker.type_check_program ast with
+  | Ok _ -> Result.ok ast
+  | Error msg -> msg |> Loc.map_item (Fmt.str "Type error: %s") |> Result.error
+
+let run ?max_logs lexbuf =
   let module WRM = WriterResultMonad in
   let open WRM.Syntax in
   let m =
@@ -44,7 +45,7 @@ let run lexbuf =
           |> Loc.with_positions ~start_pos:pos ~end_pos:pos
           |> WRM.error
     in
-    MaoInterpreter.run_program c_ast
+    MaoInterpreter.run_program ?max_logs c_ast
     =&> Loc.map_item (Fmt.str "Runtime error: %s")
   in
   try WRM.run m

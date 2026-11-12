@@ -31,6 +31,13 @@ module MemMap = struct
     val alloc : 'a -> 'a t -> 'a t * addr
     val get : addr -> 'a t -> 'a option
     val set : addr -> 'a -> 'a t -> 'a t
+
+    val next_addr : 'a t -> addr
+    (** Exclusive upper bound of the allocated addresses. *)
+
+    val to_seq_from : addr -> 'a t -> (addr * 'a) Seq.t
+    (** Bindings with address >= the given one, in increasing order. *)
+
     val pp : 'a Fmt.t -> 'a t Fmt.t
   end
 
@@ -50,6 +57,9 @@ module MemMap = struct
 
     let set addr v m =
       { map = M.add addr v m.map; next_addr = max m.next_addr (Addr.next addr) }
+
+    let next_addr m = m.next_addr
+    let to_seq_from addr m = M.to_seq_from addr m.map
 
     let pp pp_v fmt m =
       let pp_binding fmt (addr, v) =

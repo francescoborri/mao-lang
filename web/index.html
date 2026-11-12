@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mao playground (v1.0)</title>
+  <title>Mao playground (v1.1)</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -17,6 +17,10 @@
       --accent-fg: #ffffff;
       --err: #b3261e;
       --err-bg: #fdecea;
+      --sel: #fbe9dc;
+      --hl: rgba(181, 71, 12, .22);
+      --chg: #fff3c4;
+      --warn-bg: #fff6d6;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -30,12 +34,14 @@
         --accent-fg: #1a1208;
         --err: #ff8a80;
         --err-bg: #3a1f1d;
+        --sel: #3a2a1e;
+        --hl: rgba(240, 138, 75, .30);
+        --chg: #4a4116;
+        --warn-bg: #3b3513;
       }
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
@@ -44,136 +50,207 @@
       font: 16px/1.5 system-ui, sans-serif;
     }
 
-    main {
-      max-width: 64rem;
-      margin: 0 auto;
-      padding: 2rem 1.25rem 3rem;
-    }
+    main { max-width: 84rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+    h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+    p.lead { margin: 0 0 1.25rem; color: var(--muted); max-width: 60rem; }
 
-    h1 {
-      font-size: 1.5rem;
-      margin: 0 0 .25rem;
-    }
+    .layout { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; }
+    .stack { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
 
-    p.lead {
-      margin: 0 0 1.5rem;
-      color: var(--muted);
-    }
+    .label, label { display: block; font-weight: 600; margin-bottom: .4rem; }
+    .mono, .editor, table.data { font: 13px/21px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .muted { color: var(--muted); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-    .grid {
-      display: grid;
-      gap: 1.25rem;
-      grid-template-columns: 1fr 1fr;
-    }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
 
-    @media (max-width: 760px) {
-      .grid {
-        grid-template-columns: 1fr;
-      }
-    }
+    /* ---------- editor (textarea over a highlighting mirror) ---------- */
+    .editor { display: flex; height: 21rem; overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+    .gutter { margin: 0; padding: 14px 8px 14px 10px; min-width: 3rem; text-align: right; color: var(--muted); overflow: hidden; user-select: none; border-right: 1px solid var(--line); }
+    .code { position: relative; flex: 1; min-width: 0; }
+    .code textarea, .code .mirror { position: absolute; inset: 0; margin: 0; padding: 14px; font: inherit; white-space: pre; tab-size: 4; border: 0; }
+    .code .mirror { overflow: hidden; color: transparent; pointer-events: none; }
+    .code textarea { overflow: auto; resize: none; background: transparent; color: var(--fg); outline-offset: -2px; }
+    .mirror .hl { background: var(--hl); border-radius: 2px; }
+    .mirror .err { text-decoration: underline wavy var(--err); text-decoration-color: var(--err); background: var(--err-bg); }
 
-    label,
-    .label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: .4rem;
-    }
+    .bar { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem .8rem; }
+    .bar.tight { gap: .35rem; }
+    .bar .grow { flex: 1; }
+    #status { color: var(--muted); font-size: .9rem; }
 
-    textarea,
-    pre {
-      width: 100%;
-      min-height: 20rem;
-      margin: 0;
-      padding: .9rem;
-      background: var(--panel);
-      color: var(--fg);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      font: 14px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    }
+    button { font: inherit; font-weight: 600; padding: .45rem 1rem; cursor: pointer; background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px; }
+    button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+    button.small { padding: .2rem .55rem; font-size: .85rem; font-weight: 500; }
+    button:disabled { opacity: .45; cursor: default; }
+    input[type=text], input[type=number], select { font: inherit; font-size: .9rem; padding: .25rem .5rem; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
+    input.narrow { width: 5.5rem; }
+    input.search { flex: 1; min-width: 8rem; }
 
-    textarea {
-      resize: vertical;
-      tab-size: 2;
-    }
+    .diag { padding: .6rem .8rem; border-radius: 6px; border: 1px solid var(--err); color: var(--err); background: var(--err-bg); white-space: pre-wrap; }
+    .diag.warn { border-color: var(--line); color: var(--fg); background: var(--warn-bg); }
+    .diag[hidden] { display: none; }
 
-    pre {
-      overflow: auto;
-      max-height: 70vh;
-      white-space: pre-wrap;
-    }
+    /* ---------- trace ---------- */
+    .trace-head { padding: .6rem .8rem; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: .5rem; }
+    .chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+    .chip { font-size: .8rem; padding: .05rem .55rem; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+    .chip[aria-pressed=true] { color: var(--fg); border-color: var(--k, var(--accent)); box-shadow: inset 0 -2px 0 var(--k, var(--accent)); }
+    .scroll { overflow: auto; max-height: 24rem; }
+    table.data { width: 100%; border-collapse: collapse; }
+    table.data th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 600; padding: .15rem .6rem; border-bottom: 1px solid var(--line); z-index: 1; }
+    table.data td { padding: 0 .6rem; white-space: nowrap; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+    table.data td.num, table.data th.num { text-align: right; color: var(--muted); }
+    table.data tbody tr { cursor: pointer; }
+    table.data tbody tr:hover { background: color-mix(in srgb, var(--sel) 55%, transparent); }
+    table.data tr.sel { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
+    table.data tr.chg td { background: var(--chg); }
+    table.data tr.target td { outline: 1px solid var(--accent); outline-offset: -1px; }
+    .dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; margin-right: .4rem; background: var(--k, var(--muted)); }
+    .k-decl { --k: #2f7ddb; } .k-assign { --k: #2a9d5c; } .k-store { --k: #8e5bd6; }
+    .k-branch { --k: #d98a1b; } .k-def { --k: #7a7a80; } .k-call { --k: #c43d6b; } .k-invoke { --k: #1aa3a3; }
+    .empty { padding: 1rem; color: var(--muted); }
+    .pager { padding: .5rem .8rem; border-top: 1px solid var(--line); }
 
-    pre.error {
-      color: var(--err);
-      background: var(--err-bg);
-      border-color: var(--err);
-    }
-
-    :focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
-    }
-
-    .bar {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-top: .75rem;
-    }
-
-    button {
-      font: inherit;
-      font-weight: 600;
-      padding: .55rem 1.2rem;
-      cursor: pointer;
-      background: var(--accent);
-      color: var(--accent-fg);
-      border: 0;
-      border-radius: 6px;
-    }
-
-    button.secondary {
-      background: transparent;
-      color: var(--fg);
-      border: 1px solid var(--line);
-    }
-
-    button:disabled {
-      opacity: .45;
-      cursor: default;
-    }
-
-    #status {
-      color: var(--muted);
-      font-size: .9rem;
-    }
+    /* ---------- inspector ---------- */
+    .inspector { position: sticky; top: 1rem; display: flex; flex-direction: column; max-height: calc(100vh - 2rem); min-height: 18rem; }
+    @media (max-width: 1000px) { .inspector { position: static; max-height: none; } }
+    .tabs { display: flex; border-bottom: 1px solid var(--line); }
+    .tab { background: transparent; color: var(--muted); border-radius: 6px 6px 0 0; padding: .5rem 1rem; }
+    .tab[aria-selected=true] { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+    .panel { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+    .panel[hidden] { display: none; }
+    .panel .bar { padding: .5rem .8rem; }
+    .panel .scroll { max-height: none; flex: 1; }
+    .results { max-height: 9rem; overflow: auto; border-top: 1px solid var(--line); padding: .3rem .8rem; font-size: .85rem; }
+    .results a { cursor: pointer; margin-right: .6rem; color: var(--accent); white-space: nowrap; }
+    .detail { color: var(--muted); }
+    a.addr { color: var(--accent); cursor: pointer; text-decoration: underline dotted; }
   </style>
 </head>
 
 <body>
   <main>
-    <h1>Mao playground (v1.0)</h1>
+    <h1>Mao playground (v1.1)</h1>
     <p class="lead">Mao (<i>Modello astratto operazionale</i>) is a simple imperative programming language designed for
-      didactical purposes. Write your <code>.mao</code> program in the text area below and click "Run" to execute it and
-      inspect the execution trace.</p>
-    <div class="grid">
-      <section>
-        <label for="src">Program</label>
-        <textarea id="src" spellcheck="false">int n, f0, f1 = 8, 0, 1;
+      didactical purposes. Write your <code>.mao</code> program, click "Run", then step through the execution trace and
+      inspect the environment and the memory at every step.</p>
+
+    <div class="layout">
+      <div class="stack">
+        <section>
+          <label for="src">Program</label>
+          <div class="editor" id="editor">
+            <pre class="gutter" id="gutter" aria-hidden="true">1</pre>
+            <div class="code">
+              <pre class="mirror" id="mirror" aria-hidden="true"></pre>
+              <textarea id="src" spellcheck="false" wrap="off" autocapitalize="off" autocomplete="off">int n, f0, f1 = 8, 0, 1;
 while (n > 0) {
     n, f0, f1 := n - 1, f1, f0 + f1;
 }
 int fib = f0;</textarea>
-        <div class="bar">
-          <button id="run" disabled>Run</button>
-          <button id="cancel" class="secondary" disabled>Cancel</button>
-          <span id="status">Loading interpreter…</span>
+            </div>
+          </div>
+          <div class="bar" style="margin-top:.6rem">
+            <button id="run" disabled title="Ctrl/Cmd+Enter">Run</button>
+            <button id="cancel" class="secondary" disabled>Cancel</button>
+            <button id="format" class="secondary" disabled title="Shift+Alt+F">Format</button>
+            <label class="muted" style="margin:0;font-weight:400" title="Execution stops (keeping the trace) after this many log entries. 0 = unlimited.">
+              max logs <input id="maxLogs" class="narrow" type="number" min="0" step="10000" value="300000">
+            </label>
+            <span id="status">Loading interpreter…</span>
+          </div>
+          <div id="diag" class="diag" role="alert" hidden></div>
+        </section>
+
+        <section class="card" id="trace" aria-label="Execution trace">
+          <div class="trace-head">
+            <div class="bar tight">
+              <button class="secondary small" id="first" title="First (Home)">⏮</button>
+              <button class="secondary small" id="prev" title="Previous (↑ / k)">◀</button>
+              <button class="secondary small" id="next" title="Next (↓ / j)">▶</button>
+              <button class="secondary small" id="last" title="Last (End)">⏭</button>
+              <button class="secondary small" id="over" title="Step over: jump to the end of this call (o)">Step over</button>
+              <button class="secondary small" id="out" title="Step out: jump to the end of the enclosing call (u)">Step out</button>
+              <span class="grow"></span>
+              <span id="pos" class="mono muted">no trace</span>
+              <input id="goto" class="narrow" type="number" min="0" placeholder="go to #" aria-label="Go to log index">
+            </div>
+            <div class="bar tight">
+              <input id="q" class="search" type="text" placeholder="Filter logs (e.g. fib_rec, n :=, true)" aria-label="Filter logs">
+              <button class="secondary small" id="export" title="Download the (filtered) logs as CSV">CSV</button>
+            </div>
+            <div class="chips" id="chips"></div>
+          </div>
+          <div class="scroll" id="logsScroll" tabindex="0" aria-label="Log entries">
+            <table class="data">
+              <thead><tr><th class="num">#</th><th>Event</th><th>Description</th><th>Line:col</th></tr></thead>
+              <tbody id="logs"></tbody>
+            </table>
+            <div class="empty" id="logsEmpty">Run a program to see its trace.</div>
+          </div>
+          <div class="bar tight pager">
+            <button class="secondary small" id="pgFirst" title="First page">«</button>
+            <button class="secondary small" id="pgPrev" title="Previous page (PageUp)">‹</button>
+            <span class="mono">page <input id="pgNum" class="narrow" type="number" min="1" value="1" aria-label="Page number"> / <span id="pgCount">1</span></span>
+            <button class="secondary small" id="pgNext" title="Next page (PageDown)">›</button>
+            <button class="secondary small" id="pgLast" title="Last page">»</button>
+            <span class="grow"></span>
+            <select id="pgSize" aria-label="Rows per page">
+              <option>50</option><option selected>100</option><option>250</option><option>500</option>
+            </select>
+            <span class="muted">rows</span>
+          </div>
+          <div class="pager muted" style="font-size:.8rem">Click a row, then use ↑/↓ (or j/k) to step, PageUp/PageDown to change page, <b>o</b> to step over a call, <b>u</b> to step out of it. Filters make ↑/↓ skip to the next matching entry.</div>
+        </section>
+      </div>
+
+      <aside class="card inspector" aria-label="State inspector">
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" id="tab-env" aria-selected="true" aria-controls="panel-env">Environment</button>
+          <button class="tab" role="tab" id="tab-mem" aria-selected="false" aria-controls="panel-mem">Memory</button>
+          <span class="grow"></span>
+          <span id="inspTitle" class="mono muted" style="align-self:center;padding-right:.8rem"></span>
         </div>
-      </section>
-      <section>
-        <div class="label" id="out-label">Output</div>
-        <pre id="out" aria-labelledby="out-label" aria-live="polite"></pre>
-      </section>
+
+        <div class="panel" id="panel-env" role="tabpanel">
+          <div class="bar">
+            <input id="envq" class="search" type="text" placeholder="Search names, values, types…" aria-label="Search the environment">
+          </div>
+          <div class="scroll">
+            <table class="data">
+              <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Address</th></tr></thead>
+              <tbody id="envBody"></tbody>
+            </table>
+            <div class="empty" id="envEmpty" hidden>Nothing to show.</div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-mem" role="tabpanel" hidden>
+          <div class="bar tight">
+            <input id="addr" class="narrow" type="text" placeholder="0x10 / 16" aria-label="Go to address">
+            <button class="secondary small" id="memGo">Go</button>
+            <span class="grow"></span>
+            <button class="secondary small" id="memPrev" title="Previous addresses">‹</button>
+            <span id="memRange" class="mono muted"></span>
+            <button class="secondary small" id="memNext" title="Next addresses">›</button>
+          </div>
+          <div class="bar tight" style="padding-top:0">
+            <input id="memq" class="search" type="text" placeholder="Find value: 42, -3, 3.14, true, 'c', 0x1f" aria-label="Find a value in memory">
+            <button class="secondary small" id="memFind">Find</button>
+          </div>
+          <div class="results" id="memResults" hidden></div>
+          <div class="scroll">
+            <table class="data">
+              <thead><tr><th>Address</th><th>Value</th><th>Type</th><th>Owner</th></tr></thead>
+              <tbody id="memBody"></tbody>
+            </table>
+            <div class="empty" id="memEmpty" hidden>Empty memory.</div>
+          </div>
+          <div class="pager muted" style="font-size:.8rem">Highlighted rows changed since the previous log entry. Memory cells are never freed.</div>
+        </div>
+      </aside>
     </div>
   </main>
   <script src="app.js" defer></script>

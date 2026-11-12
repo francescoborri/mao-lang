@@ -1,4 +1,4 @@
-type ('a, 'e, 'b) t = 'b list * int -> ('a, 'e) result * ('b list * int)
+type ('a, 'e, 'b) t = 'b list * int * int -> ('a, 'e) result * ('b list * int * int)
 
 let ok x log = (Ok x, log)
 let error e log = (Error e, log)
@@ -16,11 +16,12 @@ let map_error m f log =
   | Ok x, log -> (Ok x, log)
   | Error e, log -> (Error (f e), log)
 
-let tell x (log, cnt) = (Ok (), (x :: log, cnt + 1))
-let get_log_id () (log, cnt) = (Ok cnt, (log, cnt))
+let tell x (log, log_id, call_id) = (Ok (), (x :: log, log_id + 1, call_id))
+let get_log_id () (log, log_id, call_id) = (Ok log_id, (log, log_id, call_id))
+let incr_call_id () (log, log_id, call_id) = (Ok call_id, (log, log_id, call_id + 1))
 
 let run m =
-  let r, (log, _) = m ([], 0) in
+  let r, (log, _, _) = m ([], 0, 0) in
   (r, List.rev log)
 
 module Syntax = struct

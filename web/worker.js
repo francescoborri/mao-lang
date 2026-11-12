@@ -1,13 +1,17 @@
 "use strict";
-// Web Worker: loads the OCaml->WASM interpreter and runs programs off the
-// main thread, so the page stays responsive and a run can be cancelled by
-// terminating this worker (see app.js).
+// Web Worker: loads the OCaml->WASM interpreter and answers requests from the
+// page. The whole trace lives on the OCaml side; the page only ever asks for
+// small windows of it (see web/main.ml). Running in a worker keeps the page
+// responsive and lets "Cancel" terminate a runaway computation (see app.js).
 //
 // Protocol
 //   worker -> page   { type: "ready" }
-//                    { type: "result", id, ok, output }
 //                    { type: "fatal", message }
-//   page -> worker   { type: "run", id, source }
+//                    { id, ok: true,  result }
+//                    { id, ok: false, error }
+//   page -> worker   { id, op, args }      op is a function of the global `Mao`
+//                                          (run, format, filter, logs, row,
+//                                          env, memory, memSearch)
 
 let failed = false;
 
@@ -20,9 +24,9 @@ function fatal(message) {
 self.addEventListener("unhandledrejection", (e) =>
   fatal("Failed to initialise the interpreter: " + e.reason));
 
-// Defines the global `runProgram` (registered by web/main.ml). The loader
-// fetches main.bc.wasm.assets/ relative to the script's location, so this
-// file must live next to it.
+// Defines the global `Mao` (registered by web/main.ml). The loader fetches
+// main.bc.wasm.assets/ relative to the script's location, so this file must
+// live next to it.
 try {
   importScripts("main.bc.wasm.js");
 } catch (err) {
@@ -30,22 +34,27 @@ try {
 }
 
 self.onmessage = (e) => {
-  const m = e.data;
-  if (m.type !== "run") return;
+  const { id, op, args } = e.data;
   try {
-    const r = self.runProgram(m.source);
-    self.postMessage({ type: "result", id: m.id, ok: r.ok, output: r.output });
+    const fn = self.Mao && self.Mao[op];
+    if (typeof fn !== "function") throw new Error("unknown operation: " + op);
+    const result = fn(...args);
+    // OCaml-side failures are reported as { fatal } instead of exceptions.
+    if (result && typeof result.fatal === "string") {
+      self.postMessage({ id, ok: false, error: result.fatal });
+    } else {
+      self.postMessage({ id, ok: true, result });
+    }
   } catch (err) {
-    self.postMessage({ type: "result", id: m.id, ok: false,
-                       output: "Internal error: " + err });
+    self.postMessage({ id, ok: false, error: "Internal error: " + err });
   }
 };
 
 // The wasm module is instantiated asynchronously: tell the page once the
-// OCaml side has registered `runProgram`.
+// OCaml side has registered `Mao`.
 (function waitForRuntime(tries) {
   if (failed) return;
-  if (typeof self.runProgram === "function") {
+  if (self.Mao && typeof self.Mao.run === "function") {
     self.postMessage({ type: "ready" });
   } else if (tries > 300) {
     fatal("Timed out waiting for the interpreter to start.");

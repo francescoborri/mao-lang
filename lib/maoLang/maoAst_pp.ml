@@ -102,7 +102,7 @@ let rec pp_expr fmt Loc.{ it = e } =
       in
       (pp_block pp_expr_block) fmt (c, e)
   | Ternary (e1, e2, e3) ->
-      Fmt.pf fmt "%a ? %a : %a" pp_inner e1 pp_inner e2 pp_inner e3
+      Fmt.pf fmt "(%a ? %a : %a)" pp_inner e1 pp_inner e2 pp_inner e3
 
 and pp_command fmt { it = c } =
   let pp_aux fmt c =

@@ -15,6 +15,7 @@
   maoLexer
   maoParser
   maoTypeChecker
-  maoInterpreter)
+  maoInterpreter
+  maoTrace)
  (modules_without_implementation maoAst)
  (libraries fmt loc writerResultMonad utils))
