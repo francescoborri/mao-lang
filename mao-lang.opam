@@ -2,8 +2,8 @@
 opam-version: "2.0"
 synopsis: "A short synopsis"
 description: "A longer description"
-maintainer: ["Francesco Borri"]
-authors: ["Francesco Borri"]
+maintainer: ["Francesco Borri" "Tommaso Crocetti"]
+authors: ["Francesco Borri" "Tommaso Crocetti"]
 license: "LGPL-3.0-or-later"
 homepage: "https://github.com/francescoborri/mao-lang"
 doc: "https://github.com/francescoborri/mao-lang"
