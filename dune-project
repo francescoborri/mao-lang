@@ -7,9 +7,9 @@
 (source
  (github francescoborri/mao-lang))
 
-(authors "Francesco Borri")
+(authors "Francesco Borri" "Tommaso Crocetti")
 
-(maintainers "Francesco Borri")
+(maintainers "Francesco Borri" "Tommaso Crocetti")
 
 (license LGPL-3.0-or-later)
 

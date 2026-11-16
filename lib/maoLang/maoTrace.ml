@@ -17,7 +17,8 @@ type text = { name : string; descr : string; key : string }
 type t = {
   logs : log Loc.t array;
   depth : int array;
-  call_end : int array;  (** begin-of-call index -> end-of-call index, or -1 *)
+  call_end : int array;  (** begin-of-call log index -> end-of-call log index, or -1 *)
+  call_begin : int array;  (** begin/end-of-call log index -> its begin log index, or -1 *)
   parent : int array;  (** innermost enclosing begin-of-call index, or -1 *)
   texts : text option array;  (** lazily computed, cached *)
   mutable view : int array option;  (** current filter result; None = all *)
@@ -30,8 +31,9 @@ type row = {
   descr : string;
   loc : Loc.loc;
   depth : int;
-  call : int;  (** call id for begin/end-of-call entries, -1 otherwise *)
-  call_end : int;  (** for a begin entry: index of its end entry, else -1 *)
+  call : int;  (** call id (NOT a log index) of begin/end-of-call entries, -1 otherwise *)
+  call_begin : int;  (** log index of the begin entry of this call, else -1 *)
+  call_end : int;  (** for a begin entry: log index of its end entry, else -1 *)
   out_end : int;  (** end entry of the innermost enclosing call, or -1 *)
 }
 
@@ -67,6 +69,24 @@ let kind_of_event = function
   | EBeginCall _ | EEndCall _ -> "call"
   | EBeginInvoke _ | EEndInvoke _ -> "invoke"
 
+(** Name shown in the UI (Italian). The "multiple" variants are the entries
+    logged for the 2nd, 3rd, ... variable of a multiple declaration/assignment.
+    Call numbers are call ids, which are unrelated to log indices. *)
+let event_name = function
+  | EDeclare _ -> "dichiarazione"
+  | EDeclares _ -> "dichiarazione (multipla)"
+  | EAssign _ -> "assegnamento"
+  | EAssigns _ -> "assegnamento (multiplo)"
+  | EArrayStore (_, _, _, addr) -> Fmt.str "scrittura su %a" IntAddr.pp addr
+  | EIfThenElse _ -> "if"
+  | EWhile _ -> "while"
+  | EFunc _ -> "dichiara funzione"
+  | EProc _ -> "dichiara procedura"
+  | EBeginCall (_, c) -> Printf.sprintf "inizio chiamata #%d" c
+  | EEndCall (_, c, _) -> Printf.sprintf "fine chiamata #%d" c
+  | EBeginInvoke (_, c) -> Printf.sprintf "inizio invocazione #%d" c
+  | EEndInvoke (_, c) -> Printf.sprintf "fine invocazione #%d" c
+
 let call_of_event = function
   | EBeginCall (_, c)
   | EEndCall (_, c, _)
@@ -87,6 +107,9 @@ let of_logs (logs : log Loc.t list) =
   let n = Array.length logs in
   let depth = Array.make n 0 in
   let call_end = Array.make n (-1) in
+  let call_begin = Array.make n (-1) in
+  (* call id -> log index of its begin entry: the two are independent counters *)
+  let begin_of_call = Hashtbl.create 64 in
   let parent = Array.make n (-1) in
   let stack = ref [] and d = ref 0 in
   let top () = match !stack with p :: _ -> p | [] -> -1 in
@@ -94,6 +117,8 @@ let of_logs (logs : log Loc.t list) =
     (fun i (l : log Loc.t) ->
       let ev = l.Loc.it.event in
       if is_begin ev then (
+        Hashtbl.replace begin_of_call (call_of_event ev) i;
+        call_begin.(i) <- i;
         parent.(i) <- top ();
         depth.(i) <- !d;
         incr d;
@@ -101,15 +126,18 @@ let of_logs (logs : log Loc.t list) =
       else if is_end ev then (
         (match !stack with _ :: tl -> stack := tl | [] -> ());
         d := max 0 (!d - 1);
-        let c = call_of_event ev in
-        if c >= 0 && c < n then call_end.(c) <- i;
+        (match Hashtbl.find_opt begin_of_call (call_of_event ev) with
+        | Some b ->
+            call_end.(b) <- i;
+            call_begin.(i) <- b
+        | None -> ());
         parent.(i) <- top ();
         depth.(i) <- !d)
       else (
         parent.(i) <- top ();
         depth.(i) <- !d))
     logs;
-  { logs; depth; call_end; parent; texts = Array.make n None; view = None }
+  { logs; depth; call_end; call_begin; parent; texts = Array.make n None; view = None }
 
 let length t = Array.length t.logs
 
@@ -134,7 +162,7 @@ let text t i =
   | Some x -> x
   | None ->
       let ev = event_at t i in
-      let name = Fmt.to_to_string pp_event_name ev in
+      let name = event_name ev in
       let descr = Fmt.to_to_string pp_event_descr ev in
       let x =
         { name; descr; key = String.lowercase_ascii (name ^ " " ^ descr) }
@@ -154,6 +182,7 @@ let row (t : t) i =
     loc = t.logs.(i).Loc.at;
     depth = t.depth.(i);
     call = call_of_event ev;
+    call_begin = t.call_begin.(i);
     call_end = t.call_end.(i);
     out_end = (if p < 0 then -1 else t.call_end.(p));
   }
@@ -240,7 +269,7 @@ let array_preview mem p n =
     List.init k (fun j ->
         match Mem.get (p + 1 + j) mem with Some v -> show v | None -> "?")
   in
-  Printf.sprintf "length %d: [%s%s]" n (String.concat ", " elems)
+  Printf.sprintf "lunghezza %d: [%s%s]" n (String.concat ", " elems)
     (if n > k then ", ..." else "")
 
 let env_rows t i =
@@ -284,7 +313,7 @@ let env_rows t i =
                 var;
                 vkind = "var";
                 addr = a;
-                value = "<undefined>";
+                value = "<non definito>";
                 ty = "?";
                 detail = "";
               })
@@ -294,7 +323,7 @@ let env_rows t i =
             vkind = "func";
             addr = -1;
             value = sig_of var params;
-            ty = "function";
+            ty = "funzione";
             detail = "";
           }
       | LambdaProc (params, _) ->
@@ -303,7 +332,7 @@ let env_rows t i =
             vkind = "proc";
             addr = -1;
             value = sig_of var params;
-            ty = "procedure";
+            ty = "procedura";
             detail = "";
           })
     (Env.bindings env)

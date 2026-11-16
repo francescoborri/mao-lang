@@ -183,6 +183,19 @@ let rec eval_expr Loc.{ it = e; at = loc } s =
   match e with
   | CVal v -> WRM.ok (eval_base_val v, s.mem)
   | CVar id -> WRM.ok (lookup_var id s, s.mem)
+  | CBinOp (e1, ((And | Or) as op), e2) -> (
+      (* short-circuit: e2 is evaluated only when it can change the result *)
+      let* v1, s = eval_expr e1 s =>> set_mem_snd s in
+      match (op, v1) with
+      | And, RTVal.Bool false -> WRM.ok (RTVal.Bool false, s.mem)
+      | Or, RTVal.Bool true -> WRM.ok (RTVal.Bool true, s.mem)
+      | _ ->
+          let* v2, s = eval_expr e2 s =>> set_mem_snd s in
+          let* v =
+            eval_bin_op (Loc.with_loc ~loc:e1.at v1) op
+              (Loc.with_loc ~loc:e2.at v2)
+          in
+          WRM.ok (v, s.mem))
   | CBinOp (e1, op, e2) ->
       let* v1, s = eval_expr e1 s =>> set_mem_snd s in
       let* v2, s = eval_expr e2 s =>> set_mem_snd s in

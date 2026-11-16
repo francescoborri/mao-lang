@@ -30,7 +30,7 @@ let current : T.t option ref = ref None
 let session () =
   match !current with
   | Some t -> t
-  | None -> failwith "no trace available: run a program first"
+  | None -> failwith "nessuna traccia disponibile: esegui prima un programma"
 
 (* ---- conversions -------------------------------------------------------- *)
 
@@ -60,6 +60,7 @@ let row_obj (r : T.row) =
       ("endCol", js_int r.loc.end_pos.col);
       ("depth", js_int r.depth);
       ("call", js_int r.call);
+      ("callBegin", js_int r.call_begin);
       ("callEnd", js_int r.call_end);
       ("outEnd", js_int r.out_end);
     ]
@@ -154,7 +155,7 @@ let row index =
   guard (fun () ->
       let t = session () in
       let i = to_int index in
-      if i < 0 || i >= T.length t then failwith "index out of range"
+      if i < 0 || i >= T.length t then failwith "indice fuori intervallo"
       else
         js_obj [ ("row", row_obj (T.row t i)); ("pos", js_int (T.locate t i)) ])
 
@@ -194,7 +195,7 @@ let mem_search index query limit =
               ("ok", js_bool false);
               ( "error",
                 js_str
-                  "Not a value. Try 42, -3, 3.14, true, 'c' or 0x1f (pointer)."
+                  "Non è un valore. Prova 42, -3, 3.14, true, 'c' oppure 0x1f (puntatore)."
               );
             ]
       | Some (cells, truncated) ->

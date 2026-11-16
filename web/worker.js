@@ -22,7 +22,7 @@ function fatal(message) {
 }
 
 self.addEventListener("unhandledrejection", (e) =>
-  fatal("Failed to initialise the interpreter: " + e.reason));
+  fatal("Impossibile inizializzare l'interprete: " + e.reason));
 
 // Defines the global `Mao` (registered by web/main.ml). The loader fetches
 // main.bc.wasm.assets/ relative to the script's location, so this file must
@@ -30,14 +30,14 @@ self.addEventListener("unhandledrejection", (e) =>
 try {
   importScripts("main.bc.wasm.js");
 } catch (err) {
-  fatal("Could not load main.bc.wasm.js: " + err);
+  fatal("Impossibile caricare main.bc.wasm.js: " + err);
 }
 
 self.onmessage = (e) => {
   const { id, op, args } = e.data;
   try {
     const fn = self.Mao && self.Mao[op];
-    if (typeof fn !== "function") throw new Error("unknown operation: " + op);
+    if (typeof fn !== "function") throw new Error("operazione sconosciuta: " + op);
     const result = fn(...args);
     // OCaml-side failures are reported as { fatal } instead of exceptions.
     if (result && typeof result.fatal === "string") {
@@ -46,7 +46,7 @@ self.onmessage = (e) => {
       self.postMessage({ id, ok: true, result });
     }
   } catch (err) {
-    self.postMessage({ id, ok: false, error: "Internal error: " + err });
+    self.postMessage({ id, ok: false, error: "Errore interno: " + err });
   }
 };
 
@@ -57,7 +57,7 @@ self.onmessage = (e) => {
   if (self.Mao && typeof self.Mao.run === "function") {
     self.postMessage({ type: "ready" });
   } else if (tries > 300) {
-    fatal("Timed out waiting for the interpreter to start.");
+    fatal("Timeout in attesa dell'avvio dell'interprete.");
   } else {
     setTimeout(() => waitForRuntime(tries + 1), 50);
   }

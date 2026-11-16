@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-# Builds the wasm interpreter and assembles the static site into ./_site
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -12,6 +11,26 @@ test -d _build/default/web/main.bc.wasm.assets \
 rm -rf _site
 mkdir -p _site
 cp web/index.html web/app.js web/worker.js _site/
+cp -r web/vendor _site/
+
+mkdir -p _site/samples
+export LC_ALL=C
+shopt -s nullglob
+samples=(sample/*.mao)
+for f in "${samples[@]}"; do cp "$f" _site/samples/; done
+{
+  printf '['
+  sep=''
+  for f in "${samples[@]}"; do
+    name=$(basename "$f")
+    name=${name//\\/\\\\}
+    name=${name//\"/\\\"}
+    printf '%s"%s"' "$sep" "$name"
+    sep=','
+  done
+  printf ']\n'
+} > _site/samples/index.json
+
 cp _build/default/web/main.bc.wasm.js _site/
 cp -r _build/default/web/main.bc.wasm.assets _site/
 chmod -R u+w _site
