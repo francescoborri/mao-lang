@@ -23,7 +23,7 @@ let return = '\n' | "\r\n"
 let white = [' ' '\t']+
 
 let digit = ['0'-'9']
-let int = digit+
+let int = '-'? digit+
 let bool = "true" | "false"
 let double = digit+ '.' digit+ | digit+ '.' | '.' digit+
 let char = '\'' ['a'-'z' 'A'-'Z' '0'-'9'] '\''
