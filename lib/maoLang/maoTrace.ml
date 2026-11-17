@@ -1,434 +1,330 @@
-(* Trace session: an indexed, query-able view over the logs of one run.
+(* Query-able view over the logs of a run, used by the web playground.
 
-   Design notes
-   - Logs hold *persistent* states (Map-based), so consecutive logs share almost
-     all of their memory. Nothing here ever materialises a whole state: every
-     query returns a bounded window (a page of logs, a page of memory cells, ...).
-   - Per-log metadata (call depth, matching end of a call, ...) is computed once
-     in O(#logs). Event texts are formatted lazily and cached, because
-     formatting through Fmt is by far the most expensive operation.
-   - This module is JS-agnostic so that it can be unit-tested natively. *)
+   Logs hold persistent states, so consecutive logs share most of their memory:
+   every query returns a single page of entries, variables or memory cells, and
+   never materialises a whole state. *)
 
+open MaoAst_pp
 open MaoDataStructure
 open MaoDataStructure_pp
+open Utils
 
-type text = { name : string; descr : string; key : string }
+module Kind = struct
+  type t = Decl | Assign | Store | Branch | Def | Call | Invoke
+
+  let all = [ Decl; Assign; Store; Branch; Def; Call; Invoke ]
+
+  let of_event = function
+    | EDeclare _ | EDeclares _ -> Decl
+    | EAssign _ | EAssigns _ -> Assign
+    | EArrayStore _ -> Store
+    | EIfThenElse _ | EWhile _ -> Branch
+    | EFunc _ | EProc _ -> Def
+    | EBeginCall _ | EEndCall _ -> Call
+    | EBeginInvoke _ | EEndInvoke _ -> Invoke
+
+  let to_string = function
+    | Decl -> "decl"
+    | Assign -> "assign"
+    | Store -> "store"
+    | Branch -> "branch"
+    | Def -> "def"
+    | Call -> "call"
+    | Invoke -> "invoke"
+
+  let of_string s = List.find_opt (fun kind -> to_string kind = s) all
+end
+
+module Entry = struct
+  type t = {
+    index : int;
+    kind : Kind.t;
+    name : string;
+    descr : string;
+    depth : int;
+    loc : Loc.loc;
+  }
+end
+
+module Var = struct
+  type t = {
+    name : string;
+    ty : string;
+    value : string;
+    array : (IntAddr.t * string) option;
+        (** address and preview of the array the variable points to *)
+    addr : IntAddr.t option;  (** [None] for functions and procedures *)
+    changed : bool;
+  }
+end
+
+module Cell = struct
+  type t = {
+    addr : IntAddr.t;
+    value : string;
+    ty : string;
+    owner : string;  (** variable (or array element) in scope stored here *)
+    changed : bool;
+  }
+end
+
+type 'a page = { items : 'a list; offset : int; total : int }
 
 type t = {
   logs : log Loc.t array;
-  depth : int array;
-  call_end : int array;  (** begin-of-call log index -> end-of-call log index, or -1 *)
-  call_begin : int array;  (** begin/end-of-call log index -> its begin log index, or -1 *)
-  parent : int array;  (** innermost enclosing begin-of-call index, or -1 *)
-  texts : text option array;  (** lazily computed, cached *)
-  mutable view : int array option;  (** current filter result; None = all *)
+  depths : int array;
+  texts : (string * string) Lazy.t array;  (** event name and description *)
+  view : int array;  (** indices of the logs passing the current filter *)
 }
 
-type row = {
-  index : int;
-  kind : string;
-  name : string;
-  descr : string;
-  loc : Loc.loc;
-  depth : int;
-  call : int;  (** call id (NOT a log index) of begin/end-of-call entries, -1 otherwise *)
-  call_begin : int;  (** log index of the begin entry of this call, else -1 *)
-  call_end : int;  (** for a begin entry: log index of its end entry, else -1 *)
-  out_end : int;  (** end entry of the innermost enclosing call, or -1 *)
-}
+(* ------------------------------------------------------------- helpers *)
 
-type env_row = {
-  var : string;
-  vkind : string;  (** "var" | "array" | "func" | "proc" *)
-  addr : int;  (** -1 when not applicable *)
-  value : string;
-  ty : string;
-  detail : string;
-}
+(* The page of at most [limit] items starting at [offset], or the last page
+   when [offset] is past the end. *)
+let page ~offset ~limit ~total nth =
+  let limit = max 1 limit in
+  let offset =
+    if offset < total then max 0 offset else max 0 (total - 1) / limit * limit
+  in
+  let items =
+    List.init (min limit (total - offset)) (fun k -> nth (offset + k))
+  in
+  { items; offset; total }
 
-type cell = {
-  caddr : int;
-  cvalue : string;
-  cty : string;
-  changed : bool;  (** differs from the previous log's memory *)
-  label : string;  (** variable / array element owning the cell, or "" *)
-}
-
-type mem_page = { bound : int; start : int; cells : cell list }
-
-(* ---------------------------------------------------------------- events *)
-
-let all_kinds = [ "decl"; "assign"; "store"; "branch"; "def"; "call"; "invoke" ]
-
-let kind_of_event = function
-  | EDeclare _ | EDeclares _ -> "decl"
-  | EAssign _ | EAssigns _ -> "assign"
-  | EArrayStore _ -> "store"
-  | EIfThenElse _ | EWhile _ -> "branch"
-  | EFunc _ | EProc _ -> "def"
-  | EBeginCall _ | EEndCall _ -> "call"
-  | EBeginInvoke _ | EEndInvoke _ -> "invoke"
-
-(** Name shown in the UI (Italian). The "multiple" variants are the entries
-    logged for the 2nd, 3rd, ... variable of a multiple declaration/assignment.
-    Call numbers are call ids, which are unrelated to log indices. *)
-let event_name = function
-  | EDeclare _ -> "dichiarazione"
-  | EDeclares _ -> "dichiarazione (multipla)"
-  | EAssign _ -> "assegnamento"
-  | EAssigns _ -> "assegnamento (multiplo)"
-  | EArrayStore (_, _, _, addr) -> Fmt.str "scrittura su %a" IntAddr.pp addr
-  | EIfThenElse _ -> "if"
-  | EWhile _ -> "while"
-  | EFunc _ -> "dichiara funzione"
-  | EProc _ -> "dichiara procedura"
-  | EBeginCall (_, c) -> Printf.sprintf "inizio chiamata #%d" c
-  | EEndCall (_, c, _) -> Printf.sprintf "fine chiamata #%d" c
-  | EBeginInvoke (_, c) -> Printf.sprintf "inizio invocazione #%d" c
-  | EEndInvoke (_, c) -> Printf.sprintf "fine invocazione #%d" c
-
-let call_of_event = function
-  | EBeginCall (_, c)
-  | EEndCall (_, c, _)
-  | EBeginInvoke (_, c)
-  | EEndInvoke (_, c) ->
-      c
-  | _ -> -1
-
-let is_begin = function EBeginCall _ | EBeginInvoke _ -> true | _ -> false
-let is_end = function EEndCall _ | EEndInvoke _ -> true | _ -> false
-let event_at t i = t.logs.(i).Loc.it.event
-let state_at t i = t.logs.(i).Loc.it.state
-
-(* ---------------------------------------------------------------- build *)
-
-let of_logs (logs : log Loc.t list) =
-  let logs = Array.of_list logs in
-  let n = Array.length logs in
-  let depth = Array.make n 0 in
-  let call_end = Array.make n (-1) in
-  let call_begin = Array.make n (-1) in
-  (* call id -> log index of its begin entry: the two are independent counters *)
-  let begin_of_call = Hashtbl.create 64 in
-  let parent = Array.make n (-1) in
-  let stack = ref [] and d = ref 0 in
-  let top () = match !stack with p :: _ -> p | [] -> -1 in
-  Array.iteri
-    (fun i (l : log Loc.t) ->
-      let ev = l.Loc.it.event in
-      if is_begin ev then (
-        Hashtbl.replace begin_of_call (call_of_event ev) i;
-        call_begin.(i) <- i;
-        parent.(i) <- top ();
-        depth.(i) <- !d;
-        incr d;
-        stack := i :: !stack)
-      else if is_end ev then (
-        (match !stack with _ :: tl -> stack := tl | [] -> ());
-        d := max 0 (!d - 1);
-        (match Hashtbl.find_opt begin_of_call (call_of_event ev) with
-        | Some b ->
-            call_end.(b) <- i;
-            call_begin.(i) <- b
-        | None -> ());
-        parent.(i) <- top ();
-        depth.(i) <- !d)
-      else (
-        parent.(i) <- top ();
-        depth.(i) <- !d))
-    logs;
-  { logs; depth; call_end; call_begin; parent; texts = Array.make n None; view = None }
-
-let length t = Array.length t.logs
-
-let kind_counts t =
-  let tbl = Hashtbl.create 8 in
-  Array.iter
-    (fun (l : log Loc.t) ->
-      let k = kind_of_event l.Loc.it.event in
-      Hashtbl.replace tbl k
-        (1 + Option.value ~default:0 (Hashtbl.find_opt tbl k)))
-    t.logs;
-  List.map
-    (fun k -> (k, Option.value ~default:0 (Hashtbl.find_opt tbl k)))
-    all_kinds
-
-let max_depth (t : t) = Array.fold_left max 0 t.depth
-
-(* ---------------------------------------------------------------- texts *)
-
-let text t i =
-  match t.texts.(i) with
-  | Some x -> x
-  | None ->
-      let ev = event_at t i in
-      let name = event_name ev in
-      let descr = Fmt.to_to_string pp_event_descr ev in
-      let x =
-        { name; descr; key = String.lowercase_ascii (name ^ " " ^ descr) }
-      in
-      t.texts.(i) <- Some x;
-      x
-
-let row (t : t) i =
-  let ev = event_at t i in
-  let ({ name; descr; _ } : text) = text t i in
-  let p = t.parent.(i) in
-  {
-    index = i;
-    kind = kind_of_event ev;
-    name;
-    descr;
-    loc = t.logs.(i).Loc.at;
-    depth = t.depth.(i);
-    call = call_of_event ev;
-    call_begin = t.call_begin.(i);
-    call_end = t.call_end.(i);
-    out_end = (if p < 0 then -1 else t.call_end.(p));
-  }
-
-(* --------------------------------------------------------- view / filter *)
+let page_of_list ~offset ~limit xs =
+  let xs = Array.of_list xs in
+  page ~offset ~limit ~total:(Array.length xs) (Array.get xs)
 
 let contains ~sub s =
-  let n = String.length s and m = String.length sub in
-  let rec at i j = j = m || (s.[i + j] = sub.[j] && at i (j + 1)) in
-  let rec go i = i + m <= n && (at i 0 || go (i + 1)) in
-  m = 0 || go 0
-
-(** Restrict the view to entries whose kind is in [kinds] and whose text
-    contains [text] (case-insensitive). Returns the number of matches. *)
-let set_filter t ~kinds ~text:q =
-  let q = String.lowercase_ascii (String.trim q) in
-  let n = Array.length t.logs in
-  if q = "" && List.for_all (fun k -> List.mem k kinds) all_kinds then (
-    t.view <- None;
-    n)
-  else
-    let res = Array.make n 0 and k = ref 0 in
-    for i = 0 to n - 1 do
-      if
-        List.mem (kind_of_event (event_at t i)) kinds
-        && (q = "" || contains ~sub:q (text t i).key)
-      then (
-        res.(!k) <- i;
-        incr k)
-    done;
-    t.view <- Some (Array.sub res 0 !k);
-    !k
-
-let view_length t =
-  match t.view with None -> Array.length t.logs | Some v -> Array.length v
-
-let index_at t pos = match t.view with None -> pos | Some v -> v.(pos)
-
-(** Position of log [i] in the current view when present (>= 0). Otherwise
-    [-p - 1], where [p] is the position at which it would be inserted (so the
-    entries around a filtered-out log are at [p - 1] and [p]). *)
-let locate t i =
-  let n = Array.length t.logs in
-  match t.view with
-  | None -> if i < 0 then -1 else if i >= n then -n - 1 else i
-  | Some v ->
-      let rec bs lo hi =
-        if lo > hi then -lo - 1
-        else
-          let mid = (lo + hi) / 2 in
-          if v.(mid) = i then mid
-          else if v.(mid) < i then bs (mid + 1) hi
-          else bs lo (mid - 1)
-      in
-      bs 0 (Array.length v - 1)
-
-let page t ~offset ~limit =
-  let len = view_length t in
-  let offset = max 0 (min offset len) in
-  let stop = min len (offset + max 0 limit) in
-  List.init (stop - offset) (fun k -> row t (index_at t (offset + k)))
-
-(* ---------------------------------------------------------- environment *)
-
-let show v = Fmt.to_to_string RTVal.pp v
-let type_name v = Fmt.to_to_string RTVal.pp_type v
-
-let sig_of name params =
-  Fmt.str "%s(%a)" name
-    (Fmt.list ~sep:(Fmt.any ", ") MaoAst_pp.pp_typed_var)
-    params
-
-let array_len mem p =
-  match Mem.get p mem with
-  | Some (RTVal.Int n) when n >= 0 -> Some n
-  | _ -> None
-
-let array_elem_type mem p =
-  match Mem.get (p + 1) mem with Some v -> type_name v | None -> "?"
-
-let array_preview mem p n =
-  let k = min n 8 in
-  let elems =
-    List.init k (fun j ->
-        match Mem.get (p + 1 + j) mem with Some v -> show v | None -> "?")
+  let n, m = (String.length s, String.length sub) in
+  let rec occurs_at i j =
+    j = m || (s.[i + j] = sub.[j] && occurs_at i (j + 1))
   in
-  Printf.sprintf "lunghezza %d: [%s%s]" n (String.concat ", " elems)
-    (if n > k then ", ..." else "")
+  let rec search i = i + m <= n && (occurs_at i 0 || search (i + 1)) in
+  search 0
 
-let env_rows t i =
-  let { env; mem } = state_at t i in
-  List.map
-    (fun (var, b) ->
-      match b with
-      | Addr a -> (
-          match Mem.get a mem with
-          | Some (RTVal.Addr p as v) -> (
-              match array_len mem p with
-              | Some n ->
-                  {
-                    var;
-                    vkind = "array";
-                    addr = a;
-                    value = show v;
-                    ty = array_elem_type mem p ^ "[]";
-                    detail = array_preview mem p n;
-                  }
-              | None ->
-                  {
-                    var;
-                    vkind = "var";
-                    addr = a;
-                    value = show v;
-                    ty = "array";
-                    detail = "";
-                  })
-          | Some v ->
-              {
-                var;
-                vkind = "var";
-                addr = a;
-                value = show v;
-                ty = type_name v;
-                detail = "";
-              }
-          | None ->
-              {
-                var;
-                vkind = "var";
-                addr = a;
-                value = "<non definito>";
-                ty = "?";
-                detail = "";
-              })
-      | LambdaFun (params, _) ->
-          {
-            var;
-            vkind = "func";
-            addr = -1;
-            value = sig_of var params;
-            ty = "funzione";
-            detail = "";
-          }
-      | LambdaProc (params, _) ->
-          {
-            var;
-            vkind = "proc";
-            addr = -1;
-            value = sig_of var params;
-            ty = "procedura";
-            detail = "";
-          })
-    (Env.bindings env)
+let normalize_query = String.trim >> String.lowercase_ascii
 
-(* --------------------------------------------------------------- memory *)
+let matches ~query fields =
+  contains ~sub:query (String.lowercase_ascii (String.concat " " fields))
 
-(* Address ranges owned by variables of the current environment. The env is
-   small, so labelling a page costs O(page * #vars) regardless of memory size. *)
-let label_ranges { env; mem } =
-  Env.bindings env
-  |> List.concat_map (fun (name, b) ->
-      match b with
-      | Addr a -> (
-          let own = (a, a, fun _ -> name) in
-          match Mem.get a mem with
-          | Some (RTVal.Addr p) -> (
-              match array_len mem p with
-              | Some n ->
-                  [
-                    own;
-                    (p, p, fun _ -> name ^ ".length");
-                    ( p + 1,
-                      p + n,
-                      fun x -> Printf.sprintf "%s[%d]" name (x - p - 1) );
-                  ]
-              | None -> [ own ])
-          | _ -> [ own ])
-      | LambdaFun _ | LambdaProc _ -> [])
+let initial_state = { env = Env.empty; mem = Mem.empty }
+let state_at { logs } i = logs.(i).Loc.it.state
+let prev_state_at t i = if i > 0 then state_at t (i - 1) else initial_state
 
-let label_of ranges a =
-  match List.find_opt (fun (lo, hi, _) -> a >= lo && a <= hi) ranges with
-  | Some (_, _, f) -> f a
-  | None -> ""
+(* --------------------------------------------------------------- trace *)
 
-let make_cell ~ranges ~prev a v =
-  let changed =
-    match prev with None -> true | Some pm -> Mem.get a pm <> Some v
+let pp_event_label fmt = function
+  | EDeclare _ | EDeclares _ -> Fmt.string fmt "dichiarazione"
+  | EAssign _ | EAssigns _ -> Fmt.string fmt "assegnamento"
+  | EArrayStore (_, _, _, addr) -> Fmt.pf fmt "scrittura su %a" IntAddr.pp addr
+  | EIfThenElse _ -> Fmt.string fmt "if"
+  | EWhile _ -> Fmt.string fmt "while"
+  | EFunc _ -> Fmt.string fmt "dichiara funzione"
+  | EProc _ -> Fmt.string fmt "dichiara procedura"
+  | EBeginCall (_, call_id) -> Fmt.pf fmt "inizio chiamata #%d" call_id
+  | EEndCall (_, call_id, _) -> Fmt.pf fmt "fine chiamata #%d" call_id
+  | EBeginInvoke (_, call_id) -> Fmt.pf fmt "inizio invocazione #%d" call_id
+  | EEndInvoke (_, call_id) -> Fmt.pf fmt "fine invocazione #%d" call_id
+
+(* Call depth of each log: the begin and end entries of a call are at the
+   depth of the caller, the entries in between one level deeper. *)
+let depths logs =
+  let depth_of depth Loc.{ it = { event } } =
+    match event with
+    | EBeginCall _ | EBeginInvoke _ -> (depth + 1, depth)
+    | EEndCall _ | EEndInvoke _ -> (depth - 1, depth - 1)
+    | _ -> (depth, depth)
   in
+  Array.fold_left_map depth_of 0 logs |> snd
+
+let texts_of Loc.{ it = { event } } =
+  (Fmt.str "%a" pp_event_label event, Fmt.str "%a" pp_event_descr event)
+
+let of_logs logs =
+  let logs = Array.of_list logs in
   {
-    caddr = a;
-    cvalue = show v;
-    cty = type_name v;
-    changed;
-    label = label_of ranges a;
+    logs;
+    depths = depths logs;
+    texts = Array.map (fun log -> lazy (texts_of log)) logs;
+    view = Array.init (Array.length logs) Fun.id;
   }
 
-let prev_mem t i = if i > 0 then Some (state_at t (i - 1)).mem else None
+let length { logs } = Array.length logs
+let max_depth { depths } = Array.fold_left max 0 depths
+let kind_at { logs } i = Kind.of_event logs.(i).Loc.it.event
 
-let mem_page t ~log ~start ~count =
-  let st = state_at t log in
-  let start = max 0 start in
-  let ranges = label_ranges st and prev = prev_mem t log in
-  let cells =
-    Mem.to_seq_from start st.mem
-    |> Seq.take (max 0 count)
-    |> Seq.map (fun (a, v) -> make_cell ~ranges ~prev a v)
-    |> List.of_seq
+let kind_counts t =
+  let count kind =
+    Seq.init (length t) (kind_at t) |> Seq.filter (( = ) kind) |> Seq.length
   in
-  { bound = Mem.next_addr st.mem; start; cells }
+  List.map (fun kind -> (kind, count kind)) Kind.all
 
-(** Typed value query: "42", "-3", "3.14", "true", "'c'", "0x1f" (pointer). *)
-let parse_query q =
-  let q = String.trim q in
-  let n = String.length q in
-  if q = "" then None
-  else if q = "true" || q = "false" then
-    Some (function RTVal.Bool b -> b = (q = "true") | _ -> false)
-  else if n = 3 && q.[0] = '\'' && q.[2] = '\'' then
-    Some (function RTVal.Char c -> c = q.[1] | _ -> false)
-  else if n > 2 && q.[0] = '0' && q.[1] = 'x' then
-    Option.map
-      (fun a -> function RTVal.Addr x -> x = a | _ -> false)
-      (int_of_string_opt q)
-  else
-    match int_of_string_opt q with
-    | Some i -> Some (function RTVal.Int x -> x = i | _ -> false)
-    | None -> (
-        match float_of_string_opt q with
-        | Some f when String.contains q '.' ->
-            Some (function RTVal.Double x -> x = f | _ -> false)
-        | _ -> None)
+let entry ({ logs; depths; texts } as t) index =
+  let name, descr = Lazy.force texts.(index) in
+  Entry.
+    {
+      index;
+      kind = kind_at t index;
+      name;
+      descr;
+      depth = depths.(index);
+      loc = logs.(index).Loc.at;
+    }
 
-(** Scan the memory of log [log] for cells equal to the typed value [query].
-    Stops after [limit] matches. [None] if the query cannot be parsed. *)
-let mem_search t ~log ~query ~limit =
-  match parse_query query with
-  | None -> None
-  | Some pred ->
-      let st = state_at t log in
-      let ranges = label_ranges st and prev = prev_mem t log in
-      let rec go seq acc k =
-        match seq () with
-        | Seq.Nil -> (List.rev acc, false)
-        | Seq.Cons ((a, v), rest) ->
-            if not (pred v) then go rest acc k
-            else if k >= limit then (List.rev acc, true)
-            else go rest (make_cell ~ranges ~prev a v :: acc) (k + 1)
-      in
-      Some (go (Mem.to_seq_from 0 st.mem) [] 0)
+let filter t ~kinds ~query =
+  let query = normalize_query query in
+  let keep i =
+    List.mem (kind_at t i) kinds
+    && (query = ""
+       ||
+       let name, descr = Lazy.force t.texts.(i) in
+       matches ~query [ name; descr ])
+  in
+  {
+    t with
+    view = Seq.init (length t) Fun.id |> Seq.filter keep |> Array.of_seq;
+  }
+
+let view_length { view } = Array.length view
+
+let entries ({ view } as t) ~offset ~limit =
+  page ~offset ~limit ~total:(Array.length view) (fun pos -> entry t view.(pos))
+
+(* Position in the view of the last entry up to log [index], or of the first
+   entry if there is none: where the selection lands when the filter changes. *)
+let position { view } index =
+  let rec count_up_to lo hi =
+    if lo >= hi then lo
+    else
+      let mid = (lo + hi) / 2 in
+      if view.(mid) <= index then count_up_to (mid + 1) hi
+      else count_up_to lo mid
+  in
+  max 0 (count_up_to 0 (Array.length view) - 1)
+
+(* --------------------------------------------------------- environment *)
+
+let preview_length = 8
+let lookup_addr = MaoInterpreter.lookup_addr
+let arr_len_addr = MaoInterpreter.arr_len_addr
+let arr_elem_addr = MaoInterpreter.arr_elem_addr
+
+(* [Some (arr_ptr, arr_len)] when the cell at [addr] points to an array *)
+let array_at addr mem =
+  match Mem.get addr mem with
+  | Some (RTVal.Addr arr_ptr) -> (
+      match Mem.get (arr_len_addr arr_ptr) mem with
+      | Some (RTVal.Int arr_len) -> Some (arr_ptr, arr_len)
+      | _ -> None)
+  | _ -> None
+
+let pp_array_preview mem fmt (arr_ptr, arr_len) =
+  let elems =
+    List.init (min arr_len preview_length) (fun idx ->
+        lookup_addr (arr_elem_addr arr_ptr idx) mem)
+  in
+  Fmt.pf fmt "lunghezza %d: [%a%s]" arr_len
+    (Fmt.list ~sep:(Fmt.any ", ") RTVal.pp)
+    elems
+    (if arr_len > preview_length then ", ..." else "")
+
+let pp_signature fmt (id, params) =
+  Fmt.pf fmt "%s(%a)" id (Fmt.list ~sep:(Fmt.any ", ") pp_typed_var) params
+
+let var_of { mem } (name, binding) =
+  let var ?array ?addr ty value =
+    Var.{ name; ty; value; array; addr; changed = false }
+  in
+  match binding with
+  | Addr addr -> (
+      let v = lookup_addr addr mem in
+      match array_at addr mem with
+      | Some ((arr_ptr, _) as arr) ->
+          let elem = lookup_addr (arr_elem_addr arr_ptr 0) mem in
+          var ~addr
+            ~array:(arr_ptr, Fmt.str "%a" (pp_array_preview mem) arr)
+            (Fmt.str "%a[]" RTVal.pp_type elem)
+            (Fmt.str "%a" RTVal.pp v)
+      | None ->
+          var ~addr (Fmt.str "%a" RTVal.pp_type v) (Fmt.str "%a" RTVal.pp v))
+  | LambdaFun (params, _) ->
+      var "funzione" (Fmt.str "%a" pp_signature (name, params))
+  | LambdaProc (params, _) ->
+      var "procedura" (Fmt.str "%a" pp_signature (name, params))
+
+(* The variables in scope after log [i]; a variable is changed when it was
+   not in scope, or was shown differently, after the previous log. *)
+let vars t i ~query ~offset ~limit =
+  let state, prev = (state_at t i, prev_state_at t i) in
+  let query = normalize_query query in
+  let with_changed (name, binding) =
+    let var = var_of state (name, binding) in
+    let prev_var =
+      Env.find_opt name prev.env |> Option.map (fun b -> var_of prev (name, b))
+    in
+    { var with Var.changed = prev_var <> Some var }
+  in
+  let var_matches Var.{ name; ty; value; array } =
+    matches ~query [ name; ty; value; Option.fold ~none:"" ~some:snd array ]
+  in
+  Env.bindings state.env |> List.map with_changed |> List.filter var_matches
+  |> page_of_list ~offset ~limit
+
+(* -------------------------------------------------------------- memory *)
+
+(* The memory regions owned by the variables in scope, as (first, last, label)
+   triples: the cell of each variable and, for arrays, their length and
+   elements. *)
+let regions { env; mem } =
+  Env.bindings env
+  |> List.concat_map (function
+    | name, Addr addr -> (
+        let var = (addr, addr, Fun.const name) in
+        match array_at addr mem with
+        | Some (arr_ptr, arr_len) ->
+            let first, last =
+              (arr_elem_addr arr_ptr 0, arr_elem_addr arr_ptr (arr_len - 1))
+            in
+            [
+              var;
+              (arr_ptr, arr_ptr, Fun.const (name ^ ".length"));
+              (first, last, fun addr -> Fmt.str "%s[%d]" name (addr - first));
+            ]
+        | None -> [ var ])
+    | _, (LambdaFun _ | LambdaProc _) -> [])
+
+let owner regions addr =
+  regions
+  |> List.find_map (fun (first, last, label) ->
+      if first <= addr && addr <= last then Some (label addr) else None)
+  |> Option.value ~default:""
+
+let cell_of ~regions ~prev (addr, v) =
+  Cell.
+    {
+      addr;
+      value = Fmt.str "%a" RTVal.pp v;
+      ty = Fmt.str "%a" RTVal.pp_type v;
+      owner = owner regions addr;
+      changed = Mem.get addr prev.mem <> Some v;
+    }
+
+(* The memory after log [i]. Without a query, pages go by address and only
+   the cells in the page are visited; with a query, the whole memory is. *)
+let memory t i ~query ~offset ~limit =
+  let state, prev = (state_at t i, prev_state_at t i) in
+  let cell = cell_of ~regions:(regions state) ~prev in
+  let cell_matches ~query Cell.{ value; owner } =
+    matches ~query [ value; owner ]
+  in
+  match normalize_query query with
+  | "" ->
+      page ~offset ~limit ~total:(Mem.next_addr state.mem) (fun addr ->
+          cell (addr, lookup_addr addr state.mem))
+  | query ->
+      Mem.to_seq_from IntAddr.zero state.mem
+      |> Seq.map cell
+      |> Seq.filter (cell_matches ~query)
+      |> List.of_seq
+      |> page_of_list ~offset ~limit

@@ -2,9 +2,11 @@
   open MaoAst
   open Utils
 
-  let unpack_string ~start_pos ~end_pos s =
-    String.to_seq s |> List.of_seq
-    |> List.map (fun c -> Loc.with_positions ~start_pos ~end_pos (CharVal c))
+  let unpack_string (start_pos, end_pos) =
+    String.to_seq >> List.of_seq
+    >> List.map (fun c -> Loc.with_positions ~start_pos ~end_pos (CharVal c))
+
+  let l (start_pos, end_pos) x = Loc.with_positions ~start_pos ~end_pos x
 %}
 
 %token <string> IDENT
@@ -13,18 +15,16 @@
 %token <bool> BOOL
 %token <char> CHAR
 %token <string> STRING
-
 %token INT_TYPE BOOL_TYPE DOUBLE_TYPE CHAR_TYPE
-
 %token SKIP ASSIGN DECLARE IF ELSE WHILE
 %token NEW LENGTH RETURN
-
 %token PLUS MINUS TIMES DIV MOD
 %token AND OR XOR NOT
 %token EQ NEQ LT LEQ GT GEQ
-
 %token DOT COMMA SEMICOLON COLON QUESTION_MARK EOF
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE
+
+%start <command> program
 
 %left OR
 %left AND
@@ -34,135 +34,96 @@
 %left PLUS MINUS
 %left TIMES DIV MOD
 
-%start <command> program
-
 %%
 
 program:
-  | c = commands ; EOF { c }
+| c = commands EOF { c }
 
 base_type:
-  | INT_TYPE { IntType }
-  | BOOL_TYPE { BoolType }
-  | DOUBLE_TYPE { DoubleType }
-  | CHAR_TYPE { CharType }
+| INT_TYPE { IntType }
+| BOOL_TYPE { BoolType }
+| DOUBLE_TYPE { DoubleType }
+| CHAR_TYPE { CharType }
 
 composite_type:
-  | t = base_type ; LBRACKET ; RBRACKET { Array t }
+| t = base_type LBRACKET RBRACKET { Array t }
 
 mao_type:
-  | t = base_type { BaseType t }
-  | t = composite_type { CompositeType t }
+| t = base_type { BaseType t }
+| t = composite_type { CompositeType t }
 
 base_val:
-  | i = INT { IntVal i |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | d = DOUBLE { DoubleVal d |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | b = BOOL { BoolVal b |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | c = CHAR { CharVal c |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
+| i = INT { l $loc @@ IntVal i }
+| d = DOUBLE { l $loc @@ DoubleVal d }
+| b = BOOL { l $loc @@ BoolVal b }
+| c = CHAR { l $loc @@ CharVal c }
 
 typed_var:
-  | t = mao_type ; id = IDENT { (t, id) }
+| t = mao_type id = IDENT { t, id }
 
 atom_expr:
-  | id = IDENT
-    { Var id |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos}
-  | v = base_val
-    { Val v |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos}
-  | id = IDENT ; LPAREN ; es = separated_list(COMMA, expr) ; RPAREN
-    { Call (id, es) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos}
-  | id = IDENT ; LBRACKET ; e = expr ; RBRACKET
-    { ArrayLoad (id, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | id = IDENT ; DOT ; LENGTH
-    { ArrayLength id |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | NEW ; t = base_type ; LBRACKET ; e = expr ; RBRACKET
-    { NewArrayDefault (t, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | LBRACKET ; vs = separated_nonempty_list(COMMA, base_val) ; RBRACKET
-    { NewArrayLiteral vs |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | s = STRING
-    { NewArrayLiteral (unpack_string ~start_pos:$startpos ~end_pos:$endpos s)
-      |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | t = mao_type ; LPAREN ; e = expr ; RPAREN
-    { Cast (t, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | LBRACE ; RETURN ; e = expr ; SEMICOLON ; RBRACE { e }
-  | LBRACE ; cs = commands ; RETURN ; e = expr SEMICOLON ; RBRACE
-    { ExprBlock (cs, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | LPAREN ; e1 = expr ; QUESTION_MARK ; e2 = expr ; COLON ; e3 = expr ; RPAREN
-    { Ternary (e1, e2, e3) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | LPAREN ; e = expr ; RPAREN { e }
+| id = IDENT { l $loc @@ Var id }
+| v = base_val { l $loc @@ Val v }
+| id = IDENT LPAREN es = separated_list(COMMA, expr) RPAREN { l $loc @@ Call (id, es) }
+| id = IDENT LBRACKET e = expr RBRACKET { l $loc @@ ArrayLoad (id, e) }
+| id = IDENT DOT LENGTH { l $loc @@ ArrayLength id }
+| NEW t = base_type LBRACKET e = expr RBRACKET { l $loc @@ NewArrayDefault (t, e) }
+| LBRACKET vs = separated_nonempty_list(COMMA, base_val) RBRACKET { l $loc @@ NewArrayLiteral vs }
+| s = STRING { l $loc @@ NewArrayLiteral (unpack_string $loc s) }
+| t = mao_type LPAREN e = expr RPAREN { l $loc @@ Cast (t, e) }
+| LBRACE RETURN e = expr SEMICOLON RBRACE { e }
+| LBRACE cs = commands RETURN e = expr SEMICOLON RBRACE { l $loc @@ ExprBlock (cs, e) }
+| LPAREN e1 = expr QUESTION_MARK e2 = expr COLON e3 = expr RPAREN { l $loc @@ Ternary (e1, e2, e3) }
+| LPAREN e = expr RPAREN { e }
 
 expr:
-  | e1 = expr ; op = PLUS ; e2 = expr
-    { BinOp (e1, Add, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = MINUS ; e2 = expr
-    { BinOp (e1, Sub, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = TIMES ; e2 = expr
-    { BinOp (e1, Mul, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = DIV ; e2 = expr
-    { BinOp (e1, Div, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = MOD ; e2 = expr
-    { BinOp (e1, Mod, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = AND ; e2 = expr
-    { BinOp (e1, And, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = OR ; e2 = expr
-    { BinOp (e1, Or, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = XOR ; e2 = expr
-    { BinOp (e1, Xor, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = EQ ; e2 = expr
-    { BinOp (e1, Eq, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = NEQ ; e2 = expr
-    { BinOp (e1, Neq, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = LT ; e2 = expr
-    { BinOp (e1, Lt, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = LEQ ; e2 = expr
-    { BinOp (e1, Leq, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = GT ; e2 = expr
-    { BinOp (e1, Gt, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | e1 = expr ; op = GEQ ; e2 = expr
-    { BinOp (e1, Geq, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | op = NOT ; e = expr
-    { UnOp (Not, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | op = MINUS ; e = expr
-    { UnOp (Neg, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | a = atom_expr { a }
+| e1 = expr op = PLUS e2 = expr { l $loc @@ BinOp (e1, Add, e2) }
+| e1 = expr op = MINUS e2 = expr { l $loc @@ BinOp (e1, Sub, e2) }
+| e1 = expr op = TIMES e2 = expr { l $loc @@ BinOp (e1, Mul, e2) }
+| e1 = expr op = DIV e2 = expr { l $loc @@ BinOp (e1, Div, e2) }
+| e1 = expr op = MOD e2 = expr { l $loc @@ BinOp (e1, Mod, e2) }
+| e1 = expr op = AND e2 = expr { l $loc @@ BinOp (e1, And, e2) }
+| e1 = expr op = OR e2 = expr { l $loc @@ BinOp (e1, Or, e2) }
+| e1 = expr op = XOR e2 = expr { l $loc @@ BinOp (e1, Xor, e2) }
+| e1 = expr op = EQ e2 = expr { l $loc @@ BinOp (e1, Eq, e2) }
+| e1 = expr op = NEQ e2 = expr { l $loc @@ BinOp (e1, Neq, e2) }
+| e1 = expr op = LT e2 = expr { l $loc @@ BinOp (e1, Lt, e2) }
+| e1 = expr op = LEQ e2 = expr { l $loc @@ BinOp (e1, Leq, e2) }
+| e1 = expr op = GT e2 = expr { l $loc @@ BinOp (e1, Gt, e2) }
+| e1 = expr op = GEQ e2 = expr { l $loc @@ BinOp (e1, Geq, e2) }
+| op = NOT e = expr { l $loc @@ UnOp (Not, e) }
+| op = MINUS e = expr { l $loc @@ UnOp (Neg, e) }
+| a = atom_expr { a }
 
 decl_lhs:
-  | d = typed_var { [ d ] }
-  | d = typed_var ; COMMA ; ds = separated_nonempty_list(COMMA, typed_var) { d :: ds }
-  | d = typed_var ; COMMA ; ids = separated_nonempty_list(COMMA, IDENT)
-    { d :: List.map (fun id -> (fst d, id)) ids }
+| d = typed_var { [ d ] }
+| d = typed_var COMMA ds = separated_nonempty_list(COMMA, typed_var) { d :: ds }
+| d = typed_var COMMA ids = separated_nonempty_list(COMMA, IDENT)
+  { d :: List.map (fun id -> (fst d, id)) ids }
 
 decl_rhs:
-  | { None }
-  | DECLARE ; es = separated_nonempty_list(COMMA, expr) { Some es }
+| { None }
+| DECLARE es = separated_nonempty_list(COMMA, expr) { Some es }
 
 commands:
-  | c = command { c }
-  | c1 = command ; c2 = commands { Seq (c1, c2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
+| c = command { c }
+| c1 = command c2 = commands { l $loc @@ Seq (c1, c2) }
 
 command:
-  | SKIP SEMICOLON { Skip |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos}
-  | ds = decl_lhs ; es = decl_rhs ; SEMICOLON
-    { Declare (ds, es) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | ids = separated_nonempty_list(COMMA, IDENT) ; ASSIGN ; es = separated_nonempty_list(COMMA, expr) ; SEMICOLON
-    { Assign (ids, es) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos}
-  | id = IDENT ; LBRACKET ; e1 = expr ; RBRACKET ; ASSIGN ; e2 = expr ; SEMICOLON
-    { ArrayStore (id, e1, e2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | IF ; LPAREN ; e = expr ; RPAREN ; LBRACE ; cs1 = commands ; RBRACE ; ELSE ; LBRACE ; cs2 = commands ; RBRACE
-    { IfThenElse (e, cs1, cs2) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | IF ; LPAREN ; e = expr ; RPAREN ; LBRACE ; cs = commands ; RBRACE
-    { IfThenElse (e, cs, Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos Skip)
-      |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | WHILE ; LPAREN ; e = expr ; RPAREN ; LBRACE ; cs = commands RBRACE
-    { While (e, cs) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | LBRACE ; cs = commands ; RBRACE
-    { Block cs |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | id = IDENT ; LPAREN ; RPAREN ; LBRACE ; cs = commands ; RBRACE
-    { Proc (id, [], cs) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | id = IDENT ; LPAREN ; RPAREN ; SEMICOLON
-    { Invoke (id, []) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | id = IDENT ; LPAREN ; ds = decl_lhs ; RPAREN ; LBRACE ; cs = commands ; RBRACE
-    { Proc (id, ds, cs) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | id = IDENT ; LPAREN ; es = separated_nonempty_list(COMMA, expr) ; RPAREN ; SEMICOLON
-    { Invoke (id, es) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
-  | t = mao_type ; id = IDENT ; LPAREN ; ds = decl_lhs ; RPAREN ; e = expr
-    { Func (id, ds, t, e) |> Loc.with_positions ~start_pos:$startpos ~end_pos:$endpos }
+| SKIP SEMICOLON { l $loc @@ Skip }
+| ds = decl_lhs es = decl_rhs SEMICOLON { l $loc @@ Declare (ds, es) }
+| ids = separated_nonempty_list(COMMA, IDENT) ASSIGN es = separated_nonempty_list(COMMA, expr) SEMICOLON
+  { l $loc @@ Assign (ids, es) }
+| id = IDENT LBRACKET e1 = expr RBRACKET ASSIGN e2 = expr SEMICOLON
+  { l $loc @@ ArrayStore (id, e1, e2) }
+| IF LPAREN e = expr RPAREN LBRACE cs1 = commands RBRACE ELSE LBRACE cs2 = commands RBRACE
+  { l $loc @@ IfThenElse (e, cs1, cs2) }
+| IF LPAREN e = expr RPAREN LBRACE cs = commands RBRACE { l $loc @@ IfThenElse (e, cs, l $loc Skip) }
+| WHILE LPAREN e = expr RPAREN LBRACE cs = commands RBRACE { l $loc @@ While (e, cs) }
+| LBRACE cs = commands RBRACE { l $loc @@ Block cs }
+| id = IDENT LPAREN RPAREN LBRACE cs = commands RBRACE { l $loc @@ Proc (id, [], cs) }
+| id = IDENT LPAREN RPAREN SEMICOLON { l $loc @@ Invoke (id, []) }
+| id = IDENT LPAREN ds = decl_lhs RPAREN LBRACE cs = commands RBRACE { l $loc @@ Proc (id, ds, cs) }
+| id = IDENT LPAREN es = separated_nonempty_list(COMMA, expr) RPAREN SEMICOLON
+  { l $loc @@ Invoke (id, es) }
+| t = mao_type id = IDENT LPAREN ds = decl_lhs RPAREN e = expr { l $loc @@ Func (id, ds, t, e) }

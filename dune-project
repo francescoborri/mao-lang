@@ -19,8 +19,8 @@
 
 (package
  (name mao-lang)
- (synopsis "A short synopsis")
- (description "A longer description")
+ (synopsis "A web interpreter for the didactical programming language MAO")
+ (description "A web interpreter for the didactical programming language MAO")
  (depends
   (ocaml (>= 5.4))
   fmt
@@ -31,6 +31,7 @@
    (and
     :with-dev-setup
     (= 0.29.0)))
-  (ocaml-lsp-server :with-dev-setup)))
+  (ocaml-lsp-server :with-dev-setup)
+  (menhir-lsp :with-dev-setup)))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

@@ -1,5 +1,6 @@
 {
   open MaoParser
+
   exception Error of string Loc.t
 
   let unexpected_char_error lexbuf c =
@@ -19,83 +20,90 @@
             (Fmt.str "unterminated block comment")))
 }
 
-let return = '\n' | "\r\n"
+let new_line = '\n' | "\r\n"
+
 let white = [' ' '\t']+
 
 let digit = ['0'-'9']
-let int = '-'? digit+
-let bool = "true" | "false"
-let double = digit+ '.' digit+ | digit+ '.' | '.' digit+
-let char = '\'' ['a'-'z' 'A'-'Z' '0'-'9'] '\''
-let string = ([' '-'~'] | '\n' | '\t')*
-let ident = ['a'-'z' 'A'-'Z']['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
-let line_comment = "//" [^ '\n' '\r']*
+let int = '-'? digit+
+
+let bool = "true" | "false"
+
+let double = digit+ '.' digit+ | digit+ '.' | '.' digit+
+
+let char = '\'' ['a'-'z' 'A'-'Z' '0'-'9'] '\''
+
+let string = ([' '-'~'] | '\n' | '\t')*
+
+let ident = ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
+
+let line_comment = "//" [^'\n' '\r']*
+
 let open_multiline_comment = "/*"
+
 let close_multiline_comment = "*/"
 
 rule read = parse
-  (* Blank characters and comments *)
-  | return { Lexing.new_line lexbuf; read lexbuf }
-  | white { read lexbuf }
-  | line_comment { read lexbuf }
-  | open_multiline_comment { comment lexbuf; read lexbuf }
-  (* Operators and symbols *)
-  | "+" { PLUS }
-  | "-" { MINUS }
-  | "*" { TIMES }
-  | "/" { DIV }
-  | "%" { MOD }
-  | "&&" { AND }
-  | "||" { OR }
-  | "xor" { XOR }
-  | "!" { NOT }
-  | "==" { EQ }
-  | "!=" { NEQ }
-  | "<=" { LEQ }
-  | "<" { LT }
-  | ">=" { GEQ }
-  | ">" { GT }
-  (* Keywords *)
-  | "int" { INT_TYPE }
-  | "bool" { BOOL_TYPE }
-  | "double" { DOUBLE_TYPE }
-  | "char" { CHAR_TYPE }
-  | "skip" { SKIP }
-  | "if" { IF }
-  | "else" { ELSE }
-  | "while" { WHILE }
-  | "new" { NEW }
-  | "length" { LENGTH }
-  | "return" { RETURN }
-  (* Symbols and delimiters *)
-  | "=" { DECLARE }
-  | ":=" { ASSIGN }
-  | "." { DOT }
-  | "," { COMMA }
-  | ";" { SEMICOLON }
-  | ":" { COLON }
-  | "?" { QUESTION_MARK }
-  | "(" { LPAREN }
-  | ")" { RPAREN }
-  | "[" { LBRACKET }
-  | "]" { RBRACKET }
-  | "{" { LBRACE }
-  | "}" { RBRACE }
-  (* Literals and identifiers *)
-  | int { INT (int_of_string (Lexing.lexeme lexbuf)) }
-  | bool { BOOL (bool_of_string (Lexing.lexeme lexbuf)) }
-  | double { DOUBLE (float_of_string (Lexing.lexeme lexbuf)) }
-  | char { CHAR (String.get (Lexing.lexeme lexbuf) 1) }
-  | '"' (string as s) '"' { STRING s }
-  | ident { IDENT (Lexing.lexeme lexbuf) }
-  | eof { EOF }
-  | _ as c { unexpected_char_error lexbuf c }
+(* Blank characters and comments *)
+| new_line { Lexing.new_line lexbuf; read lexbuf }
+| white { read lexbuf }
+| line_comment { read lexbuf }
+| open_multiline_comment { comment lexbuf; read lexbuf }
+(* Operators and symbols *)
+| "+" { PLUS }
+| "-" { MINUS }
+| "*" { TIMES }
+| "/" { DIV }
+| "%" { MOD }
+| "&&" { AND }
+| "||" { OR }
+| "xor" { XOR }
+| "!" { NOT }
+| "==" { EQ }
+| "!=" { NEQ }
+| "<=" { LEQ }
+| "<" { LT }
+| ">=" { GEQ }
+| ">" { GT }
+(* Keywords *)
+| "int" { INT_TYPE }
+| "bool" { BOOL_TYPE }
+| "double" { DOUBLE_TYPE }
+| "char" { CHAR_TYPE }
+| "skip" { SKIP }
+| "if" { IF }
+| "else" { ELSE }
+| "while" { WHILE }
+| "new" { NEW }
+| "length" { LENGTH }
+| "return" { RETURN }
+(* Symbols and delimiters *)
+| "=" { DECLARE }
+| ":=" { ASSIGN }
+| "." { DOT }
+| "," { COMMA }
+| ";" { SEMICOLON }
+| ":" { COLON }
+| "?" { QUESTION_MARK }
+| "(" { LPAREN }
+| ")" { RPAREN }
+| "[" { LBRACKET }
+| "]" { RBRACKET }
+| "{" { LBRACE }
+| "}" { RBRACE }
+(* Literals and identifiers *)
+| int { INT (int_of_string (Lexing.lexeme lexbuf)) }
+| bool { BOOL (bool_of_string (Lexing.lexeme lexbuf)) }
+| double { DOUBLE (float_of_string (Lexing.lexeme lexbuf)) }
+| char { CHAR (String.get (Lexing.lexeme lexbuf) 1) }
+| '"' (string as s) '"' { STRING s }
+| ident { IDENT (Lexing.lexeme lexbuf) }
+| eof { EOF }
+| _ as c { unexpected_char_error lexbuf c }
 
 and comment = parse
-  | close_multiline_comment { () }
-  | return { Lexing.new_line lexbuf; comment lexbuf }
-  | eof { unterminated_comment_error lexbuf }
-  | _ { comment lexbuf }
-
-
+| close_multiline_comment { () }
+| new_line { Lexing.new_line lexbuf; comment lexbuf }
+| eof { unterminated_comment_error lexbuf }
+| _ { comment lexbuf }

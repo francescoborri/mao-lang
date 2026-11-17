@@ -8,42 +8,64 @@
   <style>
     :root {
       color-scheme: light dark;
-      --bg: #fbfaf8;
+      --bg: #f6f5f2;
       --fg: #1d1d1f;
       --muted: #6b6b70;
       --panel: #ffffff;
-      --line: #d9d6cf;
+      --line: #dedad2;
+      --grid: #efece6;
+      --head: #faf9f6;
+      --zebra: #fcfbf9;
+      --hover: #f6efe8;
       --accent: #b5470c;
       --accent-fg: #ffffff;
       --err: #b3261e;
       --err-bg: #fdecea;
-      --sel: #fbe9dc;
+      --sel: #fbe6d6;
       --hl: rgba(181, 71, 12, .22);
-      --chg: #fff3c4;
-      --warn-bg: #fff6d6;
-      --t-kw: #a626a4; --t-type: #0b6fa8; --t-fn: #1e6bb8; --t-num: #986801; --t-str: #2f7a3a; --t-op: #b5470c;
+      --chg: #fff5cc;
+      --chg-mark: #e0b100;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 2px 8px rgba(0, 0, 0, .04);
+      --t-kw: #a626a4;
+      --t-type: #0b6fa8;
+      --t-fn: #1e6bb8;
+      --t-num: #986801;
+      --t-str: #2f7a3a;
+      --t-op: #b5470c;
     }
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #17171a;
+        --bg: #141416;
         --fg: #ececef;
         --muted: #9a9aa2;
-        --panel: #1f1f23;
-        --line: #36363c;
+        --panel: #1d1d21;
+        --line: #34343a;
+        --grid: #26262b;
+        --head: #212126;
+        --zebra: #202024;
+        --hover: #2b2520;
         --accent: #f08a4b;
         --accent-fg: #1a1208;
         --err: #ff8a80;
         --err-bg: #3a1f1d;
-        --sel: #3a2a1e;
+        --sel: #3d2b1e;
         --hl: rgba(240, 138, 75, .30);
-        --chg: #4a4116;
-        --warn-bg: #3b3513;
-        --t-kw: #d98cf0; --t-type: #6cc3f2; --t-fn: #7fb4f5; --t-num: #e5c07b; --t-str: #8fd19a; --t-op: #f08a4b;
+        --chg: #3b3517;
+        --chg-mark: #d6b13a;
+        --shadow: none;
+        --t-kw: #d98cf0;
+        --t-type: #6cc3f2;
+        --t-fn: #7fb4f5;
+        --t-num: #e5c07b;
+        --t-str: #8fd19a;
+        --t-op: #f08a4b;
       }
     }
 
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
@@ -52,259 +74,920 @@
       font: 16px/1.5 system-ui, sans-serif;
     }
 
-    main { max-width: 90rem; margin: 0 auto; padding: 1.25rem 1.25rem 3rem; }
-    h1 { font-size: 1.4rem; margin: 0 0 .2rem; }
-    p.lead { margin: 0 0 1rem; color: var(--muted); font-size: .92rem; max-width: 70rem; }
+    main {
+      max-width: 90rem;
+      margin: 0 auto;
+      padding: 1rem 1.25rem;
+    }
 
-    .layout { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
-    .col-editor { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
-    .col-right { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .top {
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+      margin-bottom: .8rem;
+    }
+
+    .top h1 {
+      font-size: 1.4rem;
+      margin: 0;
+    }
+
+    .top .version {
+      color: var(--muted);
+      font-size: .9rem;
+    }
+
+    .top .info-btn {
+      margin-left: auto;
+    }
+
+    .layout {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .col-editor {
+      display: flex;
+      flex-direction: column;
+      gap: .6rem;
+      min-width: 0;
+    }
+
+    .col-right {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+    }
 
     /* Large screens: an app-like layout that fits the viewport (no page
        scrollbar). Editor on the left; trace above inspector on the right. */
     @media (min-width: 1000px) and (min-height: 620px) {
-      html, body { height: 100%; }
-      body { overflow: hidden; }
-      main { height: 100%; max-width: none; margin: 0; padding: .9rem 1.1rem; display: flex; flex-direction: column; }
-      p.lead { margin-bottom: .7rem; }
-      .layout { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-      .col-editor { min-height: 0; }
-      .col-editor .editor { flex: 1; height: auto; min-height: 0; }
-      .col-right { display: grid; grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr); min-height: 0; }
-      .trace, .inspector { min-height: 0; overflow: hidden; }
-      .trace .scroll, .inspector .scroll { max-height: none; }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        overflow: hidden;
+      }
+
+      main {
+        height: 100%;
+        max-width: none;
+        margin: 0;
+        padding: .9rem 1.1rem .4rem;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .layout {
+        flex: 1;
+        min-height: 0;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+      }
+
+      .col-editor {
+        min-height: 0;
+      }
+
+      .col-editor .editor {
+        flex: 1;
+        height: auto;
+        min-height: 0;
+      }
+
+      .col-right {
+        display: grid;
+        grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr);
+        min-height: 0;
+      }
+
+      .trace,
+      .inspector {
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .trace .scroll,
+      .inspector .scroll {
+        max-height: none;
+      }
     }
 
-    label { display: block; font-weight: 600; }
-    .mono, .editor, table.data { font: 13px/21px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-    .muted { color: var(--muted); }
-    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    label {
+      display: block;
+      font-weight: 600;
+    }
 
-    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; display: flex; flex-direction: column; }
+    .mono,
+    .editor,
+    table.data td {
+      font: 13px/21px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
 
     /* ---------- editor ---------- */
-    .editor { display: flex; height: 21rem; overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
-    .gutter { margin: 0; padding: 14px 8px 14px 10px; min-width: 3rem; text-align: right; color: var(--muted); overflow: hidden; user-select: none; border-right: 1px solid var(--line); }
-    .code { position: relative; flex: 1; min-width: 0; }
+    .editor {
+      display: flex;
+      height: 21rem;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+    }
+
+    .gutter {
+      margin: 0;
+      padding: 14px 8px 14px 10px;
+      min-width: 3rem;
+      text-align: right;
+      color: var(--muted);
+      overflow: hidden;
+      user-select: none;
+      border-right: 1px solid var(--line);
+    }
+
+    .code {
+      position: relative;
+      flex: 1;
+      min-width: 0;
+    }
+
     /* Three stacked layers with identical metrics: range marks (bottom),
        Prism-highlighted text, and the real <textarea> (top, transparent text). */
-    .code .layer, .code textarea { position: absolute; inset: 0; margin: 0; padding: 14px; font: inherit; white-space: pre; tab-size: 4; border: 0; }
-    .code .layer { overflow: hidden; pointer-events: none; }
-    .code .marks { color: transparent; }
-    .code .syntax { color: var(--fg); background: transparent; }
-    .code textarea { overflow: auto; resize: none; background: transparent; color: transparent; caret-color: var(--fg); outline-offset: -2px; }
-    .code textarea::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); color: transparent; }
-    .marks .hl { background: var(--hl); border-radius: 2px; }
-    .marks .focus { background: var(--hl); box-shadow: 0 0 0 1px var(--accent); border-radius: 2px; }
-    .marks .focus.flash { animation: flash .9s ease-out; }
-    @keyframes flash { from { background: var(--accent); } to { background: var(--hl); } }
-    .marks .err { text-decoration: underline wavy var(--err); text-decoration-color: var(--err); background: var(--err-bg); }
-    .token.comment { color: var(--muted); }
-    .token.keyword { color: var(--t-kw); }
-    .token.class-name { color: var(--t-type); }
-    .token.function { color: var(--t-fn); }
-    .token.number, .token.boolean { color: var(--t-num); }
-    .token.string, .token.char { color: var(--t-str); }
-    .token.operator { color: var(--t-op); }
-    .token.punctuation { color: var(--muted); }
-    .editor-foot { display: flex; justify-content: space-between; gap: 1rem; font-size: .8rem; }
+    .code .layer,
+    .code textarea {
+      position: absolute;
+      inset: 0;
+      margin: 0;
+      padding: 14px;
+      font: inherit;
+      white-space: pre;
+      tab-size: 4;
+      border: 0;
+    }
 
-    .bar { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .7rem; }
-    .bar.tight { gap: .35rem; }
-    .grow { flex: 1; }
-    #status { color: var(--muted); font-size: .9rem; }
+    .code .layer {
+      overflow: hidden;
+      pointer-events: none;
+    }
 
-    button { font: inherit; font-weight: 600; padding: .45rem 1rem; cursor: pointer; background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px; }
-    button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
-    button.small { padding: .2rem .55rem; font-size: .85rem; font-weight: 500; }
-    button:disabled { opacity: .45; cursor: default; }
-    input[type=text], input[type=number], select { font: inherit; font-size: .9rem; padding: .25rem .5rem; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
-    input.narrow { width: 5.5rem; }
-    input.search { flex: 1; min-width: 8rem; }
+    .code .marks {
+      color: transparent;
+    }
 
-    .diag { padding: .6rem .8rem; border-radius: 6px; border: 1px solid var(--err); color: var(--err); background: var(--err-bg); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30%; overflow: auto; }
-    .diag.warn { border-color: var(--line); color: var(--fg); background: var(--warn-bg); }
-    .diag[hidden] { display: none; }
-    .linklike { padding: 0; font: inherit; font-weight: inherit; color: inherit; background: none; border: 0; text-decoration: underline; cursor: pointer; }
+    .code .syntax {
+      color: var(--fg);
+      background: transparent;
+    }
+
+    .code textarea {
+      overflow: auto;
+      resize: none;
+      background: transparent;
+      color: transparent;
+      caret-color: var(--fg);
+      outline-offset: -2px;
+    }
+
+    .code textarea::selection {
+      background: color-mix(in srgb, var(--accent) 35%, transparent);
+      color: transparent;
+    }
+
+    .marks .hl {
+      background: var(--hl);
+      border-radius: 2px;
+    }
+
+    .marks .focus {
+      background: var(--hl);
+      box-shadow: 0 0 0 1px var(--accent);
+      border-radius: 2px;
+    }
+
+    .marks .focus.flash {
+      animation: flash .9s ease-out;
+    }
+
+    @keyframes flash {
+      from {
+        background: var(--accent);
+      }
+
+      to {
+        background: var(--hl);
+      }
+    }
+
+    .marks .err {
+      text-decoration: underline wavy var(--err);
+      text-decoration-color: var(--err);
+      background: var(--err-bg);
+    }
+
+    .token.comment {
+      color: var(--muted);
+    }
+
+    .token.keyword {
+      color: var(--t-kw);
+    }
+
+    .token.class-name {
+      color: var(--t-type);
+    }
+
+    .token.function {
+      color: var(--t-fn);
+    }
+
+    .token.number,
+    .token.boolean {
+      color: var(--t-num);
+    }
+
+    .token.string,
+    .token.char {
+      color: var(--t-str);
+    }
+
+    .token.operator {
+      color: var(--t-op);
+    }
+
+    .token.punctuation {
+      color: var(--muted);
+    }
+
+    .editor-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .max-logs {
+      margin-left: auto;
+      font-weight: 400;
+    }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: .5rem .7rem;
+    }
+
+    .bar.tight {
+      gap: .35rem;
+    }
+
+    .grow {
+      flex: 1;
+    }
+
+    #status {
+      color: var(--muted);
+      font-size: .9rem;
+    }
+
+    button {
+      font: inherit;
+      font-weight: 600;
+      padding: .45rem 1rem;
+      cursor: pointer;
+      background: var(--accent);
+      color: var(--accent-fg);
+      border: 0;
+      border-radius: 6px;
+    }
+
+    button.secondary {
+      background: transparent;
+      color: var(--fg);
+      border: 1px solid var(--line);
+    }
+
+    button.secondary:hover:not(:disabled) {
+      background: var(--hover);
+    }
+
+    button.small {
+      padding: .2rem .55rem;
+      font-size: .85rem;
+      font-weight: 500;
+    }
+
+    button:disabled {
+      opacity: .45;
+      cursor: default;
+    }
+
+    input[type=text],
+    input[type=search],
+    input[type=number],
+    select {
+      font: inherit;
+      font-size: .9rem;
+      padding: .25rem .5rem;
+      color: var(--fg);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      min-width: 0;
+    }
+
+    input.narrow {
+      width: 5.5rem;
+    }
+
+    input.search {
+      flex: 1;
+      min-width: 8rem;
+    }
+
+    .info-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: .45rem;
+      padding: .25rem .8rem .25rem .3rem;
+      border-radius: 999px;
+      font-size: .9rem;
+      font-weight: 500;
+    }
+
+    .info-icon {
+      display: inline-grid;
+      place-items: center;
+      width: 1.4rem;
+      height: 1.4rem;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--accent-fg);
+      font: italic 700 .85rem/1 Georgia, serif;
+    }
+
+    .diag {
+      padding: .6rem .8rem;
+      border-radius: 6px;
+      border: 1px solid var(--err);
+      color: var(--err);
+      background: var(--err-bg);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-height: 30%;
+      overflow: auto;
+    }
+
+    .diag[hidden] {
+      display: none;
+    }
+
+    .linklike {
+      padding: 0;
+      font: inherit;
+      font-weight: inherit;
+      color: inherit;
+      background: none;
+      border: 0;
+      text-decoration: underline;
+      cursor: pointer;
+    }
 
     /* examples menu */
-    .menu { position: relative; }
-    .menu ul { position: absolute; bottom: calc(100% + .3rem); left: 0; z-index: 5; list-style: none; margin: 0; padding: .25rem; min-width: 13rem; max-height: 16rem; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, .2); }
-    .menu ul[hidden] { display: none; }
-    .menu li button { display: block; width: 100%; text-align: left; background: transparent; color: var(--fg); font-weight: 500; padding: .3rem .6rem; border-radius: 4px; }
-    .menu li button:hover, .menu li button:focus-visible { background: var(--sel); }
-    .menu .note { padding: .3rem .6rem; color: var(--muted); font-size: .9rem; }
+    .menu {
+      position: relative;
+    }
 
-    /* ---------- trace ---------- */
-    .trace-head { padding: .6rem .8rem; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: .5rem; }
-    .chips { display: flex; flex-wrap: wrap; gap: .3rem; }
-    .chip { font-size: .8rem; padding: .05rem .55rem; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-weight: 500; }
-    .chip[aria-pressed=true] { color: var(--fg); border-color: var(--k, var(--accent)); box-shadow: inset 0 -2px 0 var(--k, var(--accent)); }
-    .scroll { overflow: auto; flex: 1; min-height: 6rem; max-height: 24rem; }
-    table.data { width: 100%; border-collapse: collapse; }
-    table.data th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 600; padding: .15rem .6rem; border-bottom: 1px solid var(--line); z-index: 1; }
-    table.data td { padding: 0 .6rem; white-space: nowrap; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
-    table.data td.num, table.data th.num { text-align: right; color: var(--muted); }
-    table.data tbody tr { cursor: pointer; }
-    table.data tbody tr:hover { background: color-mix(in srgb, var(--sel) 55%, transparent); }
-    table.data tr.sel { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
-    table.data tr.chg td { background: var(--chg); }
-    table.data tr.target td { outline: 1px solid var(--accent); outline-offset: -1px; }
-    .dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; margin-right: .4rem; background: var(--k, var(--muted)); }
-    .k-decl { --k: #2f7ddb; } .k-assign { --k: #2a9d5c; } .k-store { --k: #8e5bd6; }
-    .k-branch { --k: #d98a1b; } .k-def { --k: #7a7a80; } .k-call { --k: #c43d6b; } .k-invoke { --k: #1aa3a3; }
-    .empty { padding: 1rem; color: var(--muted); }
-    .pager { padding: .5rem .8rem; border-top: 1px solid var(--line); }
-    a.loc { color: var(--accent); cursor: pointer; text-decoration: underline dotted; }
-    a.loc:hover { text-decoration: underline; }
-    .is-stale a.loc { color: var(--muted); cursor: default; pointer-events: none; text-decoration: none; }
+    .menu ul {
+      position: absolute;
+      bottom: calc(100% + .3rem);
+      left: 0;
+      z-index: 5;
+      list-style: none;
+      margin: 0;
+      padding: .25rem;
+      min-width: 13rem;
+      max-height: 16rem;
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .2);
+    }
 
-    /* ---------- inspector ---------- */
-    .inspector { min-height: 18rem; }
-    .tabs { display: flex; border-bottom: 1px solid var(--line); }
-    .tab { background: transparent; color: var(--muted); border-radius: 6px 6px 0 0; padding: .5rem 1rem; }
-    .tab[aria-selected=true] { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
-    .stateref { padding: .35rem .8rem; border-bottom: 1px solid var(--line); background: var(--sel); font-size: .88rem; box-shadow: inset 3px 0 0 var(--accent); overflow-wrap: anywhere; }
-    .panel { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-    .panel[hidden] { display: none; }
-    .panel .bar { padding: .5rem .8rem; }
-    .results { max-height: 9rem; overflow: auto; border-top: 1px solid var(--line); padding: .3rem .8rem; font-size: .85rem; }
-    .results a { cursor: pointer; margin-right: .6rem; color: var(--accent); white-space: nowrap; }
-    .detail { color: var(--muted); }
-    a.addr { color: var(--accent); cursor: pointer; text-decoration: underline dotted; }
-    .note-line { padding: .3rem .8rem; font-size: .8rem; color: var(--muted); border-top: 1px solid var(--line); }
+    .menu ul[hidden] {
+      display: none;
+    }
+
+    .menu li button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: var(--fg);
+      font-weight: 500;
+      padding: .3rem .6rem;
+      border-radius: 4px;
+    }
+
+    .menu li button:hover,
+    .menu li button:focus-visible {
+      background: var(--sel);
+    }
+
+    .menu .note {
+      padding: .3rem .6rem;
+      color: var(--muted);
+      font-size: .9rem;
+    }
+
+    /* ---------- tables ---------- */
+    .scroll {
+      overflow: auto;
+      flex: 1;
+      min-height: 6rem;
+      max-height: 24rem;
+    }
+
+    table.data {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    table.data th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head);
+      color: var(--muted);
+      text-align: left;
+      font: 600 .72rem/1 system-ui, sans-serif;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      padding: .6rem .75rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    table.data td {
+      padding: .2rem .75rem;
+      white-space: nowrap;
+      border-bottom: 1px solid var(--grid);
+    }
+
+    table.data tbody tr:nth-child(even) td {
+      background: var(--zebra);
+    }
+
+    table.data tbody tr:hover td {
+      background: var(--hover);
+    }
+
+    table.data tr.chg td {
+      background: var(--chg);
+    }
+
+    table.data tr.chg td:first-child {
+      box-shadow: inset 3px 0 0 var(--chg-mark);
+    }
+
+    table.data tr.target td {
+      background: var(--sel);
+    }
+
+    table.data tr.target td:first-child {
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    table.data tr.sel td {
+      background: var(--sel);
+    }
+
+    table.data tr.sel td:first-child {
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    table.data .num {
+      text-align: right;
+      color: var(--muted);
+      width: 1%;
+    }
+
+    #logs tr {
+      cursor: pointer;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0 .55rem;
+      border-radius: 999px;
+      font: 500 .78rem/1.6 system-ui, sans-serif;
+      color: var(--k, var(--muted));
+      background: color-mix(in srgb, var(--k, var(--muted)) 13%, transparent);
+      border: 1px solid color-mix(in srgb, var(--k, var(--muted)) 28%, transparent);
+    }
+
+    .k-decl {
+      --k: #2f7ddb;
+    }
+
+    .k-assign {
+      --k: #2a9d5c;
+    }
+
+    .k-store {
+      --k: #8e5bd6;
+    }
+
+    .k-branch {
+      --k: #d98a1b;
+    }
+
+    .k-def {
+      --k: #7a7a80;
+    }
+
+    .k-call {
+      --k: #c43d6b;
+    }
+
+    .k-invoke {
+      --k: #1aa3a3;
+    }
+
+    .type {
+      color: var(--t-type);
+    }
+
+    .owner {
+      color: var(--t-kw);
+    }
+
+    .detail {
+      color: var(--muted);
+      margin-left: .5rem;
+    }
+
+    .empty {
+      padding: 1rem;
+      color: var(--muted);
+    }
+
+    a.loc,
+    a.addr {
+      color: var(--muted);
+      cursor: pointer;
+      text-decoration: underline dotted;
+      text-underline-offset: 3px;
+    }
+
+    a.loc:hover,
+    a.addr:hover {
+      color: var(--accent);
+      text-decoration-style: solid;
+    }
+
+    a.addr {
+      color: var(--accent);
+    }
+
+    .is-stale a.loc {
+      cursor: default;
+      pointer-events: none;
+      text-decoration: none;
+    }
+
+    /* ---------- trace & inspector ---------- */
+    .card-head {
+      padding: .6rem .8rem;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: .5rem;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .3rem;
+    }
+
+    .chip {
+      font-size: .8rem;
+      padding: .05rem .55rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .chip[aria-pressed=true] {
+      color: var(--fg);
+      border-color: var(--k, var(--accent));
+      box-shadow: inset 0 -2px 0 var(--k, var(--accent));
+    }
+
+    .pager {
+      padding: .45rem .8rem;
+      border-top: 1px solid var(--line);
+      font-size: .9rem;
+    }
+
+    .pager input.narrow {
+      width: 4.5rem;
+    }
+
+    .inspector {
+      min-height: 18rem;
+    }
+
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      padding-right: .8rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tab {
+      background: transparent;
+      color: var(--muted);
+      border-radius: 0;
+      padding: .6rem 1rem;
+    }
+
+    .tab[aria-selected=true] {
+      color: var(--fg);
+      box-shadow: inset 0 -2px 0 var(--accent);
+    }
+
+    .tabs input.search {
+      max-width: 18rem;
+      margin-left: auto;
+    }
+
+    .tabs input[hidden] {
+      display: none;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      flex: 1;
+    }
+
+    .panel[hidden] {
+      display: none;
+    }
+
+    /* ---------- info panel & footer ---------- */
+    dialog.info {
+      max-width: min(42rem, calc(100vw - 2rem));
+      max-height: calc(100vh - 4rem);
+      padding: 0;
+      color: var(--fg);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
+    }
+
+    dialog.info::backdrop {
+      background: rgba(0, 0, 0, .35);
+    }
+
+    .info-inner {
+      position: relative;
+      padding: 1.2rem 1.5rem 1.4rem;
+    }
+
+    .info-inner h2 {
+      margin: 0 2rem .6rem 0;
+      font-size: 1.3rem;
+    }
+
+    .info-inner h3 {
+      margin: 1.1rem 0 .3rem;
+      font-size: 1rem;
+    }
+
+    .info-inner p,
+    .info-inner ul {
+      margin: .3rem 0;
+    }
+
+    .info-inner li {
+      margin: .2rem 0;
+    }
+
+    .info-inner kbd {
+      font: .8rem ui-monospace, monospace;
+      padding: 0 .3rem;
+      border: 1px solid var(--line);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      background: var(--head);
+    }
+
+    .info-close {
+      position: absolute;
+      top: .8rem;
+      right: .8rem;
+      width: 2rem;
+      height: 2rem;
+      padding: 0;
+      font-size: 1.2rem;
+      line-height: 1;
+    }
+
+    footer {
+      padding: .6rem 0 .2rem;
+      text-align: right;
+      color: var(--muted);
+      font-size: .85rem;
+    }
+
+    footer .heart {
+      color: #e0245e;
+    }
+
+    footer a {
+      color: inherit;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      color: var(--accent);
+      text-decoration: underline;
+    }
   </style>
 </head>
 
 <body>
   <main>
-    <header>
-      <h1>Playground Mao (v1.1)</h1>
-      <p class="lead">Mao (<i>Modello astratto operazionale</i>) è un semplice linguaggio di programmazione imperativo
-        pensato per la didattica. Scrivi un programma <code>.mao</code> e premi «Esegui»: poi clicca una riga della
-        traccia e usa ↑/↓ (o j/k) per scorrere i passi, PagSu/PagGiù per cambiare pagina, e ispeziona ambiente e memoria
-        a ogni passo.</p>
+    <header class="top">
+      <h1>Playground Mao</h1>
+      <span class="version">v1.1</span>
+      <button id="infoBtn" class="secondary info-btn" type="button" aria-haspopup="dialog">
+        <span class="info-icon" aria-hidden="true">i</span>Aiuto
+      </button>
     </header>
 
     <div class="layout">
       <section class="col-editor" aria-label="Editor">
-        <label for="src">Programma</label>
         <div class="editor" id="editor">
           <pre class="gutter" id="gutter" aria-hidden="true">1</pre>
           <div class="code">
             <pre class="layer marks" id="marks" aria-hidden="true"></pre>
             <pre class="layer syntax" id="syntax" aria-hidden="true"></pre>
-            <textarea id="src" spellcheck="false" wrap="off" autocapitalize="off" autocomplete="off">int n, f0, f1 = 8, 0, 1;
-while (n > 0) {
-    n, f0, f1 := n - 1, f1, f0 + f1;
-}
-int fib = f0;</textarea>
+            <textarea id="src" spellcheck="false" wrap="off" autocapitalize="off" autocomplete="off"
+              aria-label="Programma"></textarea>
           </div>
-        </div>
-        <div class="editor-foot muted mono">
-          <span>Tab: indenta · Maiusc+Tab: riduci · Esc poi Tab: esci dall'editor</span>
-          <span id="cursorPos">Riga 1, col. 1</span>
         </div>
         <div class="bar">
           <button id="run" disabled title="Ctrl/Cmd+Invio">Esegui</button>
           <button id="cancel" class="secondary" disabled>Annulla</button>
           <button id="format" class="secondary" disabled title="Maiusc+Alt+F">Formatta</button>
           <div class="menu">
-            <button id="examples" class="secondary" aria-haspopup="true" aria-expanded="false" aria-controls="examplesMenu">Esempi ▾</button>
+            <button id="examples" class="secondary" aria-haspopup="true" aria-expanded="false"
+              aria-controls="examplesMenu">Esempi ▾</button>
             <ul id="examplesMenu" role="menu" hidden></ul>
           </div>
-          <label class="muted" style="font-weight:400" title="L'esecuzione si ferma (mantenendo la traccia) dopo questo numero di log. 0 = illimitato.">
-            max log <input id="maxLogs" class="narrow" type="number" min="0" step="10000" value="300000">
+          <label class="max-logs muted" title="Numero massimo di passi (0 = illimitato)">
+            Limite passi <input id="maxLogs" class="narrow" type="number" min="0" step="10000" value="300000">
           </label>
+        </div>
+        <div class="editor-foot">
           <span id="status">Caricamento dell'interprete…</span>
+          <span id="cursorPos" class="muted">Riga 1, col. 1</span>
         </div>
         <div id="diag" class="diag" role="alert" hidden></div>
       </section>
 
       <div class="col-right">
         <section class="card trace" id="trace" aria-label="Traccia di esecuzione">
-          <div class="trace-head">
+          <div class="card-head">
             <div class="bar tight">
               <button class="secondary small" id="first" title="Primo (Home)">⏮</button>
               <button class="secondary small" id="prev" title="Precedente (↑ / k)">◀</button>
               <button class="secondary small" id="next" title="Successivo (↓ / j)">▶</button>
               <button class="secondary small" id="last" title="Ultimo (Fine)">⏭</button>
-              <span class="grow"></span>
-              <span id="pos" class="mono muted">nessuna traccia</span>
-              <input id="goto" class="narrow" type="number" min="0" placeholder="vai a #" aria-label="Vai al log numero">
+              <input id="q" class="search" type="search" placeholder="Cerca nella traccia…"
+                aria-label="Cerca nella traccia">
+              <span id="pos" class="mono muted"></span>
             </div>
-            <input id="q" class="search" type="text" placeholder="Filtra i log (es. fib_rec, n :=, true)" aria-label="Filtra i log">
             <div class="chips" id="chips"></div>
           </div>
-          <div class="scroll" id="logsScroll" tabindex="0" aria-label="Log di esecuzione">
+          <div class="scroll" id="logsScroll" tabindex="0" aria-label="Passi dell'esecuzione">
             <table class="data">
-              <thead><tr><th class="num">#</th><th>Evento</th><th>Descrizione</th><th>Posizione</th></tr></thead>
+              <thead>
+                <tr>
+                  <th class="num">#</th>
+                  <th>Evento</th>
+                  <th>Descrizione</th>
+                  <th>Posizione</th>
+                </tr>
+              </thead>
               <tbody id="logs"></tbody>
             </table>
-            <div class="empty" id="logsEmpty">Esegui un programma per vedere la traccia.</div>
+            <div class="empty" id="logsEmpty"></div>
           </div>
-          <div class="bar tight pager">
-            <button class="secondary small" id="pgFirst" title="Prima pagina">«</button>
-            <button class="secondary small" id="pgPrev" title="Pagina precedente (PagSu)">‹</button>
-            <span class="mono">pagina <input id="pgNum" class="narrow" type="number" min="1" value="1" aria-label="Numero di pagina"> / <span id="pgCount">1</span></span>
-            <button class="secondary small" id="pgNext" title="Pagina successiva (PagGiù)">›</button>
-            <button class="secondary small" id="pgLast" title="Ultima pagina">»</button>
-            <span class="grow"></span>
-            <select id="pgSize" aria-label="Righe per pagina">
-              <option>50</option><option selected>100</option><option>250</option><option>500</option>
-            </select>
-            <span class="muted">righe</span>
-          </div>
+          <div class="bar tight pager" id="logsPager"></div>
         </section>
 
-        <aside class="card inspector" aria-label="Ispettore dello stato">
+        <aside class="card inspector" aria-label="Stato del programma">
           <div class="tabs" role="tablist">
             <button class="tab" role="tab" id="tab-env" aria-selected="true" aria-controls="panel-env">Ambiente</button>
             <button class="tab" role="tab" id="tab-mem" aria-selected="false" aria-controls="panel-mem">Memoria</button>
+            <input id="envq" class="search" type="search" placeholder="Cerca variabili…"
+              aria-label="Cerca nell'ambiente">
+            <input id="memq" class="search" type="search" placeholder="Cerca valori o variabili…"
+              aria-label="Cerca in memoria" hidden>
           </div>
-          <div class="stateref" id="stateRef" aria-live="polite">Nessun log selezionato.</div>
 
           <div class="panel" id="panel-env" role="tabpanel">
-            <div class="bar">
-              <input id="envq" class="search" type="text" placeholder="Cerca nomi, valori, tipi…" aria-label="Cerca nell'ambiente">
-            </div>
             <div class="scroll">
               <table class="data">
-                <thead><tr><th>Nome</th><th>Tipo</th><th>Valore</th><th>Indirizzo</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Indirizzo</th>
+                    <th>Valore</th>
+                    <th>Tipo</th>
+                  </tr>
+                </thead>
                 <tbody id="envBody"></tbody>
               </table>
-              <div class="empty" id="envEmpty" hidden>Niente da mostrare.</div>
+              <div class="empty" id="envEmpty" hidden></div>
             </div>
-            <div class="note-line" id="envNote"></div>
+            <div class="bar tight pager" id="envPager"></div>
           </div>
 
           <div class="panel" id="panel-mem" role="tabpanel" hidden>
-            <div class="bar tight">
-              <input id="addr" class="narrow" type="text" placeholder="0x10 / 16" aria-label="Vai all'indirizzo">
-              <button class="secondary small" id="memGo">Vai</button>
-              <span class="grow"></span>
-              <button class="secondary small" id="memPrev" title="Indirizzi precedenti">‹</button>
-              <span id="memRange" class="mono muted"></span>
-              <button class="secondary small" id="memNext" title="Indirizzi successivi">›</button>
-            </div>
-            <div class="bar tight" style="padding-top:0">
-              <input id="memq" class="search" type="text" placeholder="Cerca valore: 42, -3, 3.14, true, 'c', 0x1f" aria-label="Cerca un valore in memoria">
-              <button class="secondary small" id="memFind">Cerca</button>
-            </div>
-            <div class="results" id="memResults" hidden></div>
             <div class="scroll">
               <table class="data">
-                <thead><tr><th>Indirizzo</th><th>Valore</th><th>Tipo</th><th>Appartiene a</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Indirizzo</th>
+                    <th>Valore</th>
+                    <th>Tipo</th>
+                    <th>Variabile</th>
+                  </tr>
+                </thead>
                 <tbody id="memBody"></tbody>
               </table>
-              <div class="empty" id="memEmpty" hidden>Memoria vuota.</div>
+              <div class="empty" id="memEmpty" hidden></div>
             </div>
-            <div class="note-line" id="memNote"></div>
+            <div class="bar tight pager" id="memPager"></div>
           </div>
         </aside>
       </div>
     </div>
+
+    <footer>
+      Fatto con <span class="heart" aria-label="amore">♥</span> da
+      <a href="https://github.com/francescoborri" target="_blank" rel="noopener">@francescoborri</a> e
+      <a href="https://github.com/Tommaso-Crocetti" target="_blank" rel="noopener">@Tommaso-Crocetti</a>
+    </footer>
   </main>
+
+  <!-- The content of this panel lives in info.html -->
+  <dialog id="info" class="info" aria-label="Come si usa">
+    <div class="info-inner">
+      <button id="infoClose" class="secondary info-close" type="button" aria-label="Chiudi">×</button>
+      <div id="infoBody"></div>
+    </div>
+  </dialog>
+
   <script>window.Prism = { manual: true };</script>
   <script src="vendor/prism-core.min.js" defer></script>
   <script src="app.js" defer></script>

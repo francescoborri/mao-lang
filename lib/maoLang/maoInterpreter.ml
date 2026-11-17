@@ -3,7 +3,6 @@ open MaoAst_pp
 open MaoDataStructure
 open WriterResultMonad.Syntax
 open Utils
-
 module WRM = WriterResultMonad
 
 let undefined_variable_error id = unreachable "undefined variable '%s'" id
@@ -40,6 +39,7 @@ let wrm_log ~loc state event =
     error_with_loc ~loc "execution stopped: log limit (%d entries) reached"
       !log_limit
   else { state; event } |> Loc.with_loc ~loc |> WRM.tell
+
 let division_by_zero_error ~loc = error_with_loc ~loc "division by zero"
 
 let index_out_of_bounds_error ~loc idx arr_len =
@@ -192,7 +192,9 @@ let rec eval_expr Loc.{ it = e; at = loc } s =
       | _ ->
           let* v2, s = eval_expr e2 s =>> set_mem_snd s in
           let* v =
-            eval_bin_op (Loc.with_loc ~loc:e1.at v1) op
+            eval_bin_op
+              (Loc.with_loc ~loc:e1.at v1)
+              op
               (Loc.with_loc ~loc:e2.at v2)
           in
           WRM.ok (v, s.mem))
@@ -271,7 +273,7 @@ and eval_command (Loc.{ it = c; at = loc } as c_with_loc) s =
       let ds = Loc.with_loc ~loc (CDeclare ds) in
       let* v, s = eval_expr e s =>> set_mem_snd s in
       let* s = eval_command ds s >>= eval_decl ~loc:e.at (t, id) v in
-      let* () = wrm_log ~loc s (EDeclares (t, id, v)) in
+      let* () = wrm_log ~loc s (EDeclare (t, id, v)) in
       WRM.ok s
   | CDeclare [] -> unreachable "declaration with no variables and no values"
   | CAssign [ (id, e) ] ->
@@ -283,7 +285,7 @@ and eval_command (Loc.{ it = c; at = loc } as c_with_loc) s =
       let xs = Loc.with_loc ~loc (CAssign xs) in
       let* v, s = eval_expr e s =>> set_mem_snd s in
       let* s = eval_command xs s =>> store_var id v =>> set_mem s in
-      let* () = wrm_log ~loc s (EAssigns (id, v)) in
+      let* () = wrm_log ~loc s (EAssign (id, v)) in
       WRM.ok s
   | CAssign [] -> unreachable "assignment with no variables"
   | CArrayStore (id, e1, e2) ->
@@ -337,4 +339,3 @@ and eval_command (Loc.{ it = c; at = loc } as c_with_loc) s =
 let run_program ?(max_logs = max_int) c st =
   log_limit := max_logs;
   eval_command c { env = Env.empty; mem = Mem.empty } st
-

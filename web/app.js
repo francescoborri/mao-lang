@@ -9,6 +9,8 @@
 //                       down never builds a backlog in the worker
 //   - "Annulla" terminates the worker (the only way to stop a running wasm
 //     computation) and starts a fresh one.
+//   - the trace, the environment and the memory are paginated tables: each
+//     page is requested to the worker when shown (see makePager).
 //
 // Source locations are links to the editor:
 //   - the location of a log entry highlights its whole start-end range;
@@ -25,11 +27,10 @@
     branch: "if / while", def: "definizioni", call: "chiamate di funzione",
     invoke: "chiamate di procedura",
   };
-  const MEM_PAGE = 128;
-  const MEM_MATCHES = 200;
   const STORAGE_KEY = "mao.source";
   const INDENT = "    ";
   const SAMPLES_DIR = "samples/";
+  const INFO_URL = "info.html";
 
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   const fmtN = (n) => n.toLocaleString("it-IT");
@@ -85,14 +86,14 @@
     sid: 0,                  // bumped on every run/cancel: invalidates async work
     runSource: null,         // source text the current trace was produced from
     total: 0,                // log entries in the trace
-    viewTotal: 0,            // entries in the current (filtered) view
     disabledKinds: new Set(),
     counts: {},
-    pageSize: 100, page: 0, rows: [],
-    selected: -1, selPos: -1, selRow: null,
+    rows: [],                // the displayed page of the (filtered) trace
+    selected: -1,            // index of the selected log
+    selPos: -1,              // its position in the filtered trace
     pendingDelta: 0,
-    tab: "env", envRows: [],
-    memStart: 0, memBound: 0, memTarget: -1,
+    tab: "env",
+    memTarget: -1,           // memory cell to highlight
     stepRange: null,         // source range of the selected entry
     focusRange: null,        // range pinned by clicking a location link
     diag: null, diagSource: null, diagId: 0,
@@ -161,7 +162,7 @@
       if (w !== worker) return;
       const m = e.data;
       if (m.type === "ready") {
-        setState("idle", "Pronto (Ctrl/Cmd+Invio per eseguire)");
+        setState("idle", "Pronto");
       } else if (m.type === "fatal") {
         fail(m.message);
       } else if (m.id !== undefined) {
@@ -242,8 +243,8 @@
   const isStale = () => S.runSource !== null && src.value !== S.runSource;
 
   // Everything derived from "what the source looked like when the trace/error
-  // was produced": once the text differs, highlights, links and messages are
-  // stale and hidden.
+  // was produced": once the text differs, highlights, links and error messages
+  // are stale and hidden.
   let diagKey = null;
   function refreshDecor() {
     const stale = isStale();
@@ -255,27 +256,19 @@
     ]);
     document.body.classList.toggle("is-stale", stale);
 
-    const key = diagLive ? "d" + S.diagId : stale ? "s" : "";
+    const key = diagLive ? "d" + S.diagId : "";
     if (key === diagKey) return;
     diagKey = key;
     diagEl.replaceChildren();
-    if (diagLive) {
-      diagEl.className = "diag";
-      diagEl.append(S.diag.prefix + S.diag.message);
-      const l = S.diag.loc;
-      if (l) {
-        const link = h("button", { type: "button", class: "linklike", title: "Sposta il cursore qui" },
-          `riga ${l.line}, colonna ${l.col}`);
-        link.addEventListener("click", () => moveCursor(l));
-        diagEl.append(" (", link, ")");
-      }
-      diagEl.hidden = false;
-    } else if (stale) {
-      diagEl.className = "diag warn";
-      diagEl.append("Il programma è cambiato dall'ultima esecuzione: la traccia qui sotto si riferisce ancora al vecchio sorgente. Premi Esegui per aggiornarla.");
-      diagEl.hidden = false;
-    } else {
-      diagEl.hidden = true;
+    diagEl.hidden = !diagLive;
+    if (!diagLive) return;
+    diagEl.append(S.diag.prefix + S.diag.message);
+    const l = S.diag.loc;
+    if (l) {
+      const link = h("button", { type: "button", class: "linklike", title: "Sposta il cursore qui" },
+        `riga ${l.line}, colonna ${l.col}`);
+      link.addEventListener("click", () => moveCursor(l));
+      diagEl.append(" (", link, ")");
     }
   }
 
@@ -403,22 +396,21 @@
   const maxLogs = () => Math.max(0, Math.floor(Number(maxLogsEl.value) || 0));
 
   function clearTrace() {
-    S.runSource = null; S.total = 0; S.viewTotal = 0; S.rows = []; S.page = 0;
-    S.selected = -1; S.selPos = -1; S.selRow = null; S.stepRange = null; S.focusRange = null;
-    S.disabledKinds = new Set(); S.counts = {}; S.envRows = [];
-    S.memStart = 0; S.memBound = 0; S.memTarget = -1; S.pendingDelta = 0;
+    S.runSource = null; S.total = 0; S.rows = [];
+    S.selected = -1; S.selPos = -1; S.stepRange = null; S.focusRange = null;
+    S.disabledKinds = new Set(); S.counts = {};
+    S.memTarget = -1; S.pendingDelta = 0;
     S.diag = null; S.diagSource = null;
-    $("q").value = ""; $("memq").value = "";
+    $("q").value = ""; $("envq").value = ""; $("memq").value = "";
     $("chips").replaceChildren();
     $("logs").replaceChildren();
     $("envBody").replaceChildren();
     $("memBody").replaceChildren();
-    $("memResults").hidden = true;
-    $("memRange").textContent = "";
-    $("envNote").textContent = "";
-    $("memNote").textContent = "";
+    $("envEmpty").hidden = true;
+    $("memEmpty").hidden = true;
+    for (const p of [logsPager, envPager, memPager]) p.update(0, 0);
     showEmpty("Esegui un programma per vedere la traccia.");
-    renderPos(); renderPager(); refreshDecor();
+    renderPos(); refreshDecor();
   }
 
   async function run() {
@@ -442,7 +434,6 @@
     if (sid !== S.sid) return;
     S.runSource = source;
     S.total = res.total;
-    S.viewTotal = res.total;
     S.counts = res.kinds;
     setState("idle", `${fmtN(res.total)} log in ${elapsed()} s` +
       (res.maxDepth ? `, profondità massima delle chiamate ${res.maxDepth}` : "") +
@@ -453,7 +444,7 @@
       showEmpty("L'esecuzione non ha prodotto log.");
       refreshDecor();
     } else {
-      nav("filter", () => applyFilter(true)); // loads the last page, selects the last entry
+      nav("filter", () => applyFilter(true)); // selects the last entry: the final state
     }
   }
 
@@ -550,6 +541,71 @@
     }
   });
 
+  // ------------------------------------------------------------------- pager
+  // Pagination bar of a table: « ‹ pagina [n] di N › » and rows per page.
+  // `onPage(offset)` must load the page starting at `offset` and then call
+  // `update(offset, total)` with what the worker returned.
+  function makePager(id, sizes, size, { onPage, onSize }) {
+    const button = (text, title) =>
+      h("button", { type: "button", class: "secondary small", title }, text);
+    const first = button("«", "Prima pagina"), prev = button("‹", "Pagina precedente");
+    const next = button("›", "Pagina successiva"), last = button("»", "Ultima pagina");
+    const num = h("input", { class: "narrow", type: "number", min: "1", value: "1", "aria-label": "Numero di pagina" });
+    const count = h("span", null, "1");
+    const select = h("select", { "aria-label": "Righe per pagina" },
+      ...sizes.map((n) => h("option", { selected: n === size ? "" : null }, String(n))));
+    $(id).append(first, prev, h("span", null, "pagina ", num, " di ", count), next, last,
+      h("span", { class: "grow" }), select, h("span", { class: "muted" }, "righe"));
+
+    const p = {
+      offset: 0, total: 0, size,
+      pages: () => Math.max(1, Math.ceil(p.total / p.size)),
+      page: () => Math.floor(p.offset / p.size),
+      update(offset, total) {
+        p.offset = offset; p.total = total;
+        count.textContent = fmtN(p.pages());
+        num.value = p.page() + 1;
+        num.max = p.pages();
+        first.disabled = prev.disabled = p.page() <= 0;
+        next.disabled = last.disabled = p.page() >= p.pages() - 1;
+      },
+      go(page) { onPage(clamp(page, 0, p.pages() - 1) * p.size); },
+    };
+    first.addEventListener("click", () => p.go(0));
+    prev.addEventListener("click", () => p.go(p.page() - 1));
+    next.addEventListener("click", () => p.go(p.page() + 1));
+    last.addEventListener("click", () => p.go(Infinity));
+    num.addEventListener("change", () => p.go(Number(num.value) - 1));
+    select.addEventListener("change", () => {
+      p.size = Number(select.value);
+      p.offset = p.offset - (p.offset % p.size);
+      onSize();
+    });
+    return p;
+  }
+
+  const logsPager = makePager("logsPager", [50, 100, 250, 500], 100, {
+    onPage: (offset) => nav("page", () => loadLogs(offset)),
+    onSize: () => nav("select", () => S.selPos >= 0 ? selectPos(S.selPos, { reload: true }) : loadLogs(0)),
+  });
+  const envPager = makePager("envPager", [10, 25, 50, 100], 25, {
+    onPage: (offset) => nav("inspector", () => loadEnv(offset)),
+    onSize: () => nav("inspector", () => loadEnv(envPager.offset)),
+  });
+  const memPager = makePager("memPager", [16, 32, 64, 128], 32, {
+    onPage: (offset) => nav("inspector", () => loadMem(offset)),
+    onSize: () => nav("inspector", () => loadMem(memPager.offset)),
+  });
+
+  // Like scrollIntoView, but only scrolls the given box (never the page).
+  function keepVisible(box, el) {
+    const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
+    const th = box.querySelector("thead");
+    const top = b.top + (th ? th.offsetHeight : 0);
+    if (r.top < top) box.scrollTop -= top - r.top;
+    else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom;
+  }
+
   // -------------------------------------------------------------------- trace
   function showEmpty(text) {
     $("logsEmpty").textContent = text;
@@ -561,7 +617,7 @@
     box.replaceChildren();
     for (const k of KINDS) {
       if (!S.counts[k]) continue;
-      const b = h("button", { class: `chip k-${k}`, "aria-pressed": "true", "data-kind": k },
+      const b = h("button", { class: `chip k-${k}`, "aria-pressed": "true" },
         `${KIND_LABEL[k]} ${fmtN(S.counts[k])}`);
       b.addEventListener("click", () => {
         if (S.disabledKinds.has(k)) S.disabledKinds.delete(k); else S.disabledKinds.add(k);
@@ -572,163 +628,106 @@
     }
   }
 
-  // Sends the filter to the worker, then re-selects (or selects the last entry
-  // on the first call) so that the table shows the page around the selection.
+  // Sends the filter to the worker, then selects the last entry (first run)
+  // or the visible entry closest to the current selection.
   async function applyFilter(initial) {
     const sid = S.sid;
     if (!S.total) return;
     const kinds = KINDS.filter((k) => !S.disabledKinds.has(k));
-    const r = await rpc("filter", kinds, $("q").value);
+    const { total } = await rpc("filter", kinds, $("q").value);
     if (sid !== S.sid) return;
-    S.viewTotal = r.count;
-    await selectNow(S.selected >= 0 && !initial ? S.selected : S.total - 1, { reload: true });
+    logsPager.total = total;
+    const pos = initial || S.selected < 0 ? total - 1 : await rpc("position", S.selected);
+    if (sid !== S.sid) return;
+    await selectPos(pos, { reload: true });
   }
 
-  async function loadPage(page) {
+  async function loadLogs(offset) {
     const sid = S.sid;
-    const maxPage = Math.max(0, Math.ceil(S.viewTotal / S.pageSize) - 1);
-    page = clamp(page, 0, maxPage);
-    const r = await rpc("logs", page * S.pageSize, S.pageSize);
-    if (sid !== S.sid) return;
-    S.page = page; S.rows = r.rows; S.viewTotal = r.total;
+    const r = await rpc("logs", offset, logsPager.size);
+    if (sid !== S.sid) return false;
+    S.rows = r.items;
+    logsPager.update(r.offset, r.total);
     renderRows();
-    renderPager();
+    return true;
   }
 
-  function locText(r) {
-    return `${r.line}:${r.col}–${r.endLine}:${r.endCol}`;
-  }
+  const locText = (r) => `${r.line}:${r.col}–${r.endLine}:${r.endCol}`;
 
   function renderRows() {
     const frag = document.createDocumentFragment();
-    for (const r of S.rows) {
-      const tr = h("tr", { class: r.i === S.selected ? "sel" : null, "data-i": r.i });
-      tr.append(
+    S.rows.forEach((r, k) => {
+      frag.append(h("tr", { "data-pos": logsPager.offset + k },
         h("td", { class: "num" }, String(r.i)),
-        h("td", { style: `padding-left:${0.6 + r.depth * 0.9}rem` },
-          h("span", { class: `dot k-${r.kind}` }), r.name),
+        h("td", { style: `padding-left:${0.75 + r.depth * 1.1}rem` },
+          h("span", { class: `badge k-${r.kind}` }, r.name)),
         h("td", null, r.descr),
-        h("td", null, h("a", { class: "loc", role: "button", tabindex: "-1", title: "Evidenzia nel codice" }, locText(r))));
-      frag.append(tr);
-    }
+        h("td", null, h("a", { class: "loc", role: "button", tabindex: "-1", title: "Evidenzia nel codice" }, locText(r)))));
+    });
     $("logs").replaceChildren(frag);
-    if (S.rows.length) {
-      $("logsEmpty").hidden = true;
-    } else {
-      showEmpty(S.total ? "Nessun log corrisponde al filtro." : "Esegui un programma per vedere la traccia.");
-    }
+    if (S.rows.length) $("logsEmpty").hidden = true;
+    else showEmpty(S.total ? "Nessun log corrisponde alla ricerca." : "Esegui un programma per vedere la traccia.");
     markSelected();
-  }
-
-  // Like scrollIntoView, but only scrolls the given box (never the page).
-  function keepVisible(box, el) {
-    const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
-    const th = box.querySelector("thead");
-    const top = b.top + (th ? th.offsetHeight : 0);
-    if (r.top < top) box.scrollTop -= top - r.top;
-    else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom;
   }
 
   function markSelected() {
     let found = null;
     for (const tr of $("logs").children) {
-      const on = Number(tr.dataset.i) === S.selected;
+      const on = S.selPos >= 0 && Number(tr.dataset.pos) === S.selPos;
       tr.classList.toggle("sel", on);
       if (on) found = tr;
     }
     if (found) keepVisible($("logsScroll"), found);
   }
 
-  function renderPager() {
-    const pages = Math.max(1, Math.ceil(S.viewTotal / S.pageSize));
-    $("pgCount").textContent = fmtN(pages);
-    $("pgNum").value = S.page + 1;
-    $("pgNum").max = pages;
-    $("pgFirst").disabled = $("pgPrev").disabled = S.page <= 0;
-    $("pgNext").disabled = $("pgLast").disabled = S.page >= pages - 1;
-  }
-
-  // Which log the inspector refers to, stated explicitly above both tabs.
-  function renderStateRef() {
-    const box = $("stateRef"), r = S.selRow;
-    box.replaceChildren();
-    if (!S.total || !r) { box.append("Nessun log selezionato."); return; }
-    box.append("Stato dopo il log ", h("b", null, `#${fmtN(S.selected)}`),
-      ` di ${fmtN(S.total - 1)} — ${r.name}`, r.descr ? `: ${r.descr}` : "");
-    if (S.selected === S.total - 1) box.append(" (ultimo log: stato finale)");
-  }
-
-  function changedNote() {
-    return S.selected > 0
-      ? `Evidenziato: modificato rispetto al log #${fmtN(S.selected - 1)}.`
-      : "Primo log: tutto è nuovo rispetto allo stato iniziale (vuoto).";
-  }
-
   function renderPos() {
-    const r = S.selRow;
-    const has = S.total > 0 && r;
-    $("pos").textContent = !S.total ? "nessuna traccia"
-      : !has ? `${fmtN(S.total)} log`
-      : `#${fmtN(S.selected)} di ${fmtN(S.total - 1)}` + (S.selPos < 0 ? " (nascosto dal filtro)" : "");
-    $("first").disabled = $("prev").disabled = !has || (S.selPos >= 0 && S.selPos === 0);
-    $("next").disabled = $("last").disabled = !has || (S.selPos >= 0 && S.selPos >= S.viewTotal - 1);
-    renderStateRef();
+    const has = S.total > 0 && S.selPos >= 0;
+    $("pos").textContent = !S.total ? "" : S.selected >= 0 ? `#${fmtN(S.selected)} di ${fmtN(S.total - 1)}` : "";
+    $("first").disabled = $("prev").disabled = !has || S.selPos === 0;
+    $("next").disabled = $("last").disabled = !has || S.selPos >= logsPager.total - 1;
   }
 
-  async function selectNow(index, opts) {
-    const sid = S.sid;
-    if (!S.total) return;
-    index = clamp(Math.floor(index), 0, S.total - 1);
-    const r = await rpc("row", index);
-    if (sid !== S.sid) return;
-    S.selected = index; S.selRow = r.row; S.selPos = r.pos;
-    const reload = opts && opts.reload;
-    if (r.pos >= 0) {
-      const page = Math.floor(r.pos / S.pageSize);
-      if (reload || page !== S.page || (!S.rows.length && S.viewTotal)) await loadPage(page);
-    } else if (reload) {
-      const ins = -r.pos - 1;
-      await loadPage(S.viewTotal ? Math.floor(Math.min(ins, S.viewTotal - 1) / S.pageSize) : 0);
+  // Selects the entry at position `pos` of the filtered trace, loading its
+  // page when needed. With an empty view the selection is kept unchanged.
+  async function selectPos(pos, opts = {}) {
+    const sid = S.sid, size = logsPager.size;
+    if (!logsPager.total) {
+      S.selPos = -1;
+      if (opts.reload) await loadLogs(0);
+      renderPos();
+      return;
     }
-    if (sid !== S.sid) return;
+    pos = clamp(pos, 0, logsPager.total - 1);
+    const offset = pos - (pos % size);
+    if (opts.reload || offset !== logsPager.offset || !S.rows.length) {
+      if (!(await loadLogs(offset))) return;
+    }
+    const row = S.rows[pos - logsPager.offset];
+    if (sid !== S.sid || !row) return;
+    S.selected = row.i; S.selPos = pos;
     markSelected();
     renderPos();
-    S.stepRange = { start: r.row.start, end: r.row.end };
+    S.stepRange = { start: row.start, end: row.end };
     // Clicking a location link pins (and flashes) the range of the entry.
-    S.focusRange = opts && opts.flash ? { start: r.row.start, end: r.row.end } : null;
+    S.focusRange = opts.flash ? { start: row.start, end: row.end } : null;
     refreshDecor();
-    if (!isStale()) revealLine(r.row.line);
+    if (!isStale()) revealLine(row.line);
     await refreshInspector();
   }
 
-  async function selectByPos(p) {
-    const sid = S.sid;
-    if (!S.viewTotal) return;
-    p = clamp(p, 0, S.viewTotal - 1);
-    const page = Math.floor(p / S.pageSize);
-    if (page !== S.page || !S.rows.length) await loadPage(page);
-    if (sid !== S.sid) return;
-    const row = S.rows[p - S.page * S.pageSize];
-    if (row) await selectNow(row.i);
-  }
-
-  // Step in the current (possibly filtered) view; deltas accumulate while busy.
+  // Step in the filtered trace; deltas accumulate while the worker is busy.
   function stepView(delta) {
     if (!S.total) return;
     S.pendingDelta += delta;
     nav("step", async () => {
       const d = S.pendingDelta;
       S.pendingDelta = 0;
-      if (!d || !S.viewTotal) return;
-      // selPos < 0: the selection is filtered out; -selPos-1 is where it would be.
-      const ins = -S.selPos - 1;
-      const p = S.selPos >= 0 ? S.selPos + d : (d > 0 ? ins + d - 1 : ins + d);
-      await selectByPos(p);
+      if (d && S.selPos >= 0) await selectPos(S.selPos + d);
     });
   }
 
-  const goTo = (i, opts) => nav("select", () => selectNow(i, opts));
-  const toPage = (p) => nav("page", () => loadPage(p));
+  const select = (pos, opts) => nav("select", () => selectPos(pos, opts));
+  const toPage = (page) => logsPager.go(page);
 
   // --------------------------------------------------------------- inspector
   function setTab(name) {
@@ -736,119 +735,90 @@
     for (const t of ["env", "mem"]) {
       $("tab-" + t).setAttribute("aria-selected", String(t === name));
       $("panel-" + t).hidden = t !== name;
+      $(t + "q").hidden = t !== name;
     }
     nav("inspector", refreshInspector);
   }
 
   async function refreshInspector() {
     if (S.selected < 0) return;
-    if (S.tab === "env") await loadEnv(); else await loadMem();
-  }
-
-  async function loadEnv() {
-    const sid = S.sid, i = S.selected;
-    const [cur, prev] = await Promise.all([rpc("env", i), i > 0 ? rpc("env", i - 1) : null]);
-    if (sid !== S.sid) return;
-    const sig = (r) => `${r.value}|${r.detail}|${r.addr}`;
-    const before = new Map((prev ? prev.rows : []).map((r) => [r.name, sig(r)]));
-    S.envRows = cur.rows.map((r) => ({ ...r, changed: before.get(r.name) !== sig(r) }));
-    renderEnv();
-    $("envNote").textContent = changedNote();
+    if (S.tab === "env") await loadEnv(envPager.offset); else await loadMem(memPager.offset);
   }
 
   function addrLink(addr, text) {
     return h("a", { class: "addr", "data-addr": addr, title: "Mostra in memoria" }, text);
   }
 
-  function renderEnv() {
-    const q = $("envq").value.trim().toLowerCase();
-    const rows = S.envRows.filter((r) =>
-      !q || `${r.name} ${r.type} ${r.value} ${r.detail}`.toLowerCase().includes(q));
+  function setEmpty(id, shown, text) {
+    $(id).hidden = shown > 0;
+    $(id).textContent = text;
+  }
+
+  async function loadEnv(offset) {
+    const sid = S.sid;
+    if (S.selected < 0) return;
+    const q = $("envq").value;
+    const r = await rpc("env", S.selected, q, offset, envPager.size);
+    if (sid !== S.sid) return;
+    envPager.update(r.offset, r.total);
     const frag = document.createDocumentFragment();
-    for (const r of rows) {
-      const tr = h("tr", { class: r.changed ? "chg" : null });
+    for (const v of r.items) {
       const value = h("td", null);
-      if (r.kind === "array") {
-        value.append(addrLink(Number(r.value), r.value), " ", h("span", { class: "detail" }, r.detail));
-      } else {
-        value.append(r.value);
-      }
-      tr.append(h("td", null, r.name), h("td", { class: "muted" }, r.type), value,
-        h("td", null, r.addr >= 0 ? addrLink(r.addr, hex(r.addr)) : "—"));
-      frag.append(tr);
+      if (v.array !== null) value.append(addrLink(v.array, v.value), h("span", { class: "detail" }, v.preview));
+      else value.append(v.value);
+      frag.append(h("tr", { class: v.changed ? "chg" : null },
+        h("td", null, v.name),
+        h("td", null, v.addr !== null ? addrLink(v.addr, hex(v.addr)) : "—"),
+        value, h("td", { class: "type" }, v.type)));
     }
     $("envBody").replaceChildren(frag);
-    $("envEmpty").hidden = rows.length > 0;
-    $("envEmpty").textContent = S.envRows.length ? "Nessun risultato." : "L'ambiente è vuoto.";
+    setEmpty("envEmpty", r.items.length, q.trim() ? "Nessun risultato." : "L'ambiente è vuoto.");
   }
 
-  async function loadMem(retry) {
-    const sid = S.sid, i = S.selected;
-    const p = await rpc("memory", i, S.memStart, MEM_PAGE);
+  async function loadMem(offset) {
+    const sid = S.sid;
+    if (S.selected < 0) return;
+    const q = $("memq").value;
+    const r = await rpc("memory", S.selected, q, offset, memPager.size);
     if (sid !== S.sid) return;
-    S.memBound = p.bound;
-    if (!p.cells.length && p.bound > 0 && S.memStart >= p.bound && !retry) {
-      S.memStart = Math.floor((p.bound - 1) / MEM_PAGE) * MEM_PAGE; // memory was smaller back then
-      return loadMem(true);
-    }
+    memPager.update(r.offset, r.total);
     const frag = document.createDocumentFragment();
-    for (const c of p.cells) {
-      const cls = [c.changed ? "chg" : "", c.addr === S.memTarget ? "target" : ""].join(" ").trim();
-      frag.append(h("tr", { class: cls || null },
-        h("td", null, hex(c.addr), h("span", { class: "muted" }, ` (${c.addr})`)),
-        h("td", null, c.value), h("td", { class: "muted" }, c.type), h("td", null, c.label)));
+    for (const c of r.items) {
+      const cls = c.addr === S.memTarget ? "target" : c.changed ? "chg" : null;
+      frag.append(h("tr", { class: cls },
+        h("td", null, hex(c.addr)),
+        h("td", null, c.value), h("td", { class: "type" }, c.type),
+        h("td", { class: "owner" }, c.owner)));
     }
     $("memBody").replaceChildren(frag);
-    $("memEmpty").hidden = p.cells.length > 0;
-    const last = p.cells.length ? p.cells[p.cells.length - 1].addr : p.start;
-    $("memRange").textContent = p.cells.length ? `${hex(p.start)}–${hex(last)} di ${fmtN(p.bound)}` : "";
-    $("memPrev").disabled = p.start <= 0;
-    $("memNext").disabled = p.start + MEM_PAGE >= p.bound;
-    $("memNote").textContent = `${changedNote()} Le celle di memoria non vengono mai liberate.`;
+    setEmpty("memEmpty", r.items.length, q.trim() ? "Nessun risultato." : "La memoria è vuota.");
     const target = $("memBody").querySelector("tr.target");
     if (target) keepVisible(target.closest(".scroll"), target);
-    if ($("memq").value.trim()) await memSearch();
-    else $("memResults").hidden = true;
   }
 
-  // Re-run on every step, so the search acts as a watch on a value.
-  async function memSearch() {
-    const sid = S.sid, q = $("memq").value.trim(), box = $("memResults");
-    if (!q || S.selected < 0) { box.hidden = true; return; }
-    const r = await rpc("memSearch", S.selected, q, MEM_MATCHES);
-    if (sid !== S.sid) return;
-    box.hidden = false;
-    box.replaceChildren();
-    if (!r.ok) { box.append(r.error); return; }
-    if (!r.cells.length) { box.append("Nessuna cella contiene questo valore."); return; }
-    box.append(r.truncated ? `prime ${MEM_MATCHES} corrispondenze: `
-      : `${r.cells.length} ${r.cells.length === 1 ? "corrispondenza" : "corrispondenze"}: `);
-    for (const c of r.cells) {
-      box.append(addrLink(c.addr, hex(c.addr) + (c.label ? ` ${c.label}` : "")));
-    }
-  }
-
+  // Shows (and highlights) the memory cell at `addr`.
   function showMem(addr) {
     S.memTarget = addr;
-    S.memStart = Math.floor(addr / MEM_PAGE) * MEM_PAGE;
+    $("memq").value = "";
+    memPager.offset = addr - (addr % memPager.size);
     if (S.tab !== "mem") setTab("mem"); else nav("inspector", refreshInspector);
   }
 
-  function memPage(delta) {
-    S.memStart = Math.max(0, S.memStart + delta * MEM_PAGE);
-    nav("inspector", refreshInspector);
-  }
+  // --------------------------------------------------------------- info panel
+  const info = $("info");
+  let infoLoaded = false;
 
-  function goToAddress() {
-    const t = $("addr").value.trim();
-    const a = Number(t);
-    if (t === "" || !Number.isInteger(a) || a < 0) {
-      $("addr").setCustomValidity("Inserisci un indirizzo come 0x1f oppure 31");
-      $("addr").reportValidity();
-      return;
+  async function openInfo() {
+    info.showModal();
+    if (infoLoaded) return;
+    try {
+      const r = await fetch(INFO_URL);
+      if (!r.ok) throw new Error(r.status);
+      $("infoBody").innerHTML = await r.text();
+      infoLoaded = true;
+    } catch (_) {
+      $("infoBody").textContent = "Impossibile caricare le informazioni.";
     }
-    $("addr").setCustomValidity("");
-    showMem(a);
   }
 
   // ------------------------------------------------------------------ wiring
@@ -856,35 +826,33 @@
   cancelBtn.addEventListener("click", cancel);
   formatBtn.addEventListener("click", format);
 
-  $("first").addEventListener("click", () => nav("step", () => selectByPos(0)));
-  $("last").addEventListener("click", () => nav("step", () => selectByPos(S.viewTotal - 1)));
+  $("infoBtn").addEventListener("click", openInfo);
+  $("infoClose").addEventListener("click", () => info.close());
+  info.addEventListener("click", (e) => { if (e.target === info) info.close(); }); // backdrop
+
+  $("first").addEventListener("click", () => select(0));
+  $("last").addEventListener("click", () => select(logsPager.total - 1));
   $("prev").addEventListener("click", () => stepView(-1));
   $("next").addEventListener("click", () => stepView(1));
-  $("goto").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && $("goto").value !== "") goTo(Number($("goto").value));
-  });
 
-  let filterTimer = null;
-  $("q").addEventListener("input", () => {
-    clearTimeout(filterTimer);
-    filterTimer = setTimeout(() => nav("filter", () => applyFilter(false)), 250);
-  });
+  // Search boxes: wait for a pause in typing before asking the worker.
+  function debounced(f) {
+    let timer = null;
+    return () => { clearTimeout(timer); timer = setTimeout(f, 250); };
+  }
+  $("q").addEventListener("input", debounced(() => nav("filter", () => applyFilter(false))));
+  $("envq").addEventListener("input", debounced(() => nav("inspector", () => loadEnv(0))));
+  $("memq").addEventListener("input", debounced(() => {
+    S.memTarget = -1;
+    nav("inspector", () => loadMem(0));
+  }));
 
   // A row click selects the entry; a click on its location link also pins and
   // flashes the entry's source range in the editor.
   $("logs").addEventListener("click", (e) => {
     const tr = e.target.closest("tr");
     if (!tr) return;
-    goTo(Number(tr.dataset.i), { flash: !!e.target.closest("a.loc") && !isStale() });
-  });
-  $("pgFirst").addEventListener("click", () => toPage(0));
-  $("pgPrev").addEventListener("click", () => toPage(S.page - 1));
-  $("pgNext").addEventListener("click", () => toPage(S.page + 1));
-  $("pgLast").addEventListener("click", () => toPage(Infinity));
-  $("pgNum").addEventListener("change", () => toPage(Number($("pgNum").value) - 1));
-  $("pgSize").addEventListener("change", () => {
-    S.pageSize = Number($("pgSize").value);
-    if (S.total) nav("select", () => selectNow(S.selected, { reload: true }));
+    select(Number(tr.dataset.pos), { flash: !!e.target.closest("a.loc") && !isStale() });
   });
 
   // Keyboard navigation while the trace has focus (click a row first).
@@ -893,10 +861,10 @@
     if (!S.total) return;
     const step = { ArrowDown: 1, j: 1, ArrowUp: -1, k: -1 }[e.key];
     if (step) stepView(step);
-    else if (e.key === "Home") nav("step", () => selectByPos(0));
-    else if (e.key === "End") nav("step", () => selectByPos(S.viewTotal - 1));
-    else if (e.key === "PageDown") toPage(S.page + 1);
-    else if (e.key === "PageUp") toPage(S.page - 1);
+    else if (e.key === "Home") select(0);
+    else if (e.key === "End") select(logsPager.total - 1);
+    else if (e.key === "PageDown") toPage(logsPager.page() + 1);
+    else if (e.key === "PageUp") toPage(logsPager.page() - 1);
     else return;
     e.preventDefault();
   });
@@ -908,21 +876,10 @@
 
   $("tab-env").addEventListener("click", () => setTab("env"));
   $("tab-mem").addEventListener("click", () => setTab("mem"));
-  $("envq").addEventListener("input", renderEnv);
   $("panel-env").addEventListener("click", (e) => {
     const a = e.target.closest("a.addr");
     if (a) showMem(Number(a.dataset.addr));
   });
-  $("memResults").addEventListener("click", (e) => {
-    const a = e.target.closest("a.addr");
-    if (a) showMem(Number(a.dataset.addr));
-  });
-  $("memGo").addEventListener("click", goToAddress);
-  $("addr").addEventListener("keydown", (e) => { if (e.key === "Enter") goToAddress(); });
-  $("memPrev").addEventListener("click", () => memPage(-1));
-  $("memNext").addEventListener("click", () => memPage(1));
-  $("memFind").addEventListener("click", () => nav("inspector", memSearch));
-  $("memq").addEventListener("keydown", (e) => { if (e.key === "Enter") nav("inspector", memSearch); });
 
   // -------------------------------------------------------------------- init
   try {

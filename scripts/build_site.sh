@@ -10,7 +10,7 @@ test -d _build/default/web/main.bc.wasm.assets \
 
 rm -rf _site
 mkdir -p _site
-cp web/index.html web/app.js web/worker.js _site/
+cp web/index.html web/info.html web/app.js web/worker.js _site/
 cp -r web/vendor _site/
 
 mkdir -p _site/samples

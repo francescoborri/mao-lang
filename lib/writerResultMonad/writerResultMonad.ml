@@ -1,4 +1,5 @@
-type ('a, 'e, 'b) t = 'b list * int * int -> ('a, 'e) result * ('b list * int * int)
+type ('a, 'e, 'b) t =
+  'b list * int * int -> ('a, 'e) result * ('b list * int * int)
 
 let ok x log = (Ok x, log)
 let error e log = (Error e, log)
@@ -18,7 +19,9 @@ let map_error m f log =
 
 let tell x (log, log_id, call_id) = (Ok (), (x :: log, log_id + 1, call_id))
 let get_log_id () (log, log_id, call_id) = (Ok log_id, (log, log_id, call_id))
-let incr_call_id () (log, log_id, call_id) = (Ok call_id, (log, log_id, call_id + 1))
+
+let incr_call_id () (log, log_id, call_id) =
+  (Ok call_id, (log, log_id, call_id + 1))
 
 let run m =
   let r, (log, _, _) = m ([], 0, 0) in

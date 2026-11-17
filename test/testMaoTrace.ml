@@ -1,9 +1,5 @@
 open MaoLang
 
-let run ?max_logs src =
-  let res, logs = run ?max_logs (Lexing.from_string src) in
-  (res, Trace.of_logs logs)
-
 let fib =
   {|int fib_rec(int n) {
     int r;
@@ -20,135 +16,141 @@ fib_iter(n, ptr);
 int x, y = fib_rec(n), ptr[0];
 bool ok = x == y;|}
 
+let run ?max_logs src =
+  let res, logs = run ?max_logs (Lexing.from_string src) in
+  (res, Trace.of_logs logs)
+
 let check name b =
   if not b then (
-    Printf.eprintf "FAIL: %s\n" name;
+    Fmt.epr "FAIL: %s@." name;
     exit 1)
 
-let () =
-  (* ---- comments are skipped by the lexer but must not shift locations *)
-  let src_c =
+let error_contains ~sub = function
+  | Error Loc.{ it = msg } -> Trace.contains ~sub msg
+  | Ok _ -> false
+
+let test_locations () =
+  let src =
     "int x = 1; // nota\n/* blocco\n   su due righe */\nint y = x / 0;"
   in
-  let res, t = run src_c in
-  check "comment program: one log before the error" (Trace.length t = 1);
+  let res, t = run src in
+  check "comments: one log before the error" (Trace.length t = 1);
   (match res with
-  | Error { Loc.at; _ } ->
-      check "error line/col after comments"
-        (at.Loc.start_pos.Loc.line = 4 && at.Loc.start_pos.Loc.col = 13)
-  | Ok _ -> check "should fail" false);
-  (match MaoLang.run (Lexing.from_string "int x = 1; /* mai chiuso") with
-  | Error { Loc.it; _ }, _ ->
-      check "unterminated comment" (Trace.contains ~sub:"unterminated" it)
-  | Ok _, _ -> check "unterminated comment must fail" false);
-  (* ---- a complete run *)
+  | Error Loc.{ at = { start_pos } } ->
+      check "comments: error position" (start_pos.line = 4 && start_pos.col = 13)
+  | Ok _ -> check "comments: division by zero must fail" false);
+  let res, _ = run "int x = 1; /* mai chiuso" in
+  check "unterminated comment" (error_contains ~sub:"unterminated" res)
+
+let test_entries () =
   let res, t = run fib in
-  check "run ok" (Result.is_ok res);
   let n = Trace.length t in
-  check "has logs" (n > 100);
-  (* Every begin is paired with its end through the call id. Call ids and log
-     indices are independent counters: they must not be mixed up. *)
-  let ids = ref [] and distinct = ref false in
-  for i = 0 to n - 1 do
-    let r = Trace.row t i in
-    if r.call_end >= 0 then begin
-      let e = Trace.row t r.call_end in
-      check "end after begin" (e.index > r.index);
-      check "same call id" (e.call = r.call && r.call >= 0);
-      check "call_begin of begin and end entries"
-        (r.call_begin = r.index && e.call_begin = r.index);
-      check "same depth" (e.depth = r.depth);
-      ids := r.call :: !ids;
-      if r.call <> r.index then distinct := true
-    end
-    else if r.call < 0 then
-      check "non-call entries have no call" (r.call_begin = -1)
-  done;
-  let ids = List.rev !ids in
-  check "call ids are 0, 1, 2, ... in order of begin entries"
-    (ids = List.init (List.length ids) Fun.id);
-  check "call ids differ from log indices" !distinct;
-  check "depth > 0 inside calls" (Trace.max_depth t > 0);
-  (* out_end of an inner entry is the end of the enclosing call *)
-  let inner = ref (-1) in
-  for i = n - 1 downto 0 do
-    if (Trace.row t i).out_end >= 0 then inner := i
-  done;
-  check "has nested entry" (!inner >= 0);
-  let r = Trace.row t !inner in
-  let e = Trace.row t r.out_end in
-  check "out_end is the end of an enclosing call"
-    (e.call_begin >= 0 && e.call_begin < r.index && e.index > r.index);
-  (* Italian event names, used both for display and for text search *)
-  let names =
-    List.map (fun (r : Trace.row) -> r.name) (Trace.page t ~offset:0 ~limit:n)
+  let entries = (Trace.entries t ~offset:0 ~limit:n).items in
+  check "fib: run ok" (Result.is_ok res);
+  check "fib: has logs" (n > 100 && List.length entries = n);
+  check "fib: depth inside calls" (Trace.max_depth t > 0);
+  let names = List.map (fun Trace.Entry.{ name } -> name) entries in
+  check "fib: names carry the call id"
+    (List.mem "inizio invocazione #0" names
+    && List.mem "fine invocazione #0" names);
+  let depth_of name =
+    List.find (fun Trace.Entry.{ name = name' } -> name' = name) entries
+    |> fun Trace.Entry.{ depth } -> depth
   in
-  check "begin names carry the call id, not the log index"
-    (List.exists (fun nm -> nm = "inizio invocazione #0") names
-    && List.exists (fun nm -> nm = "fine invocazione #0") names);
-  (* ---- final environment & memory *)
-  let last = n - 1 in
-  let env = Trace.env_rows t last in
-  let find v = List.find (fun (r : Trace.env_row) -> r.var = v) env in
-  check "x = 55" ((find "x").value = "55" && (find "y").value = "55");
-  check "ok = true" ((find "ok").value = "true");
-  check "ptr is array"
-    ((find "ptr").vkind = "array" && (find "ptr").ty = "int[]");
-  check "fib_rec is func" ((find "fib_rec").vkind = "func");
-  let mp = Trace.mem_page t ~log:last ~start:0 ~count:4 in
-  check "page size" (List.length mp.cells = 4 && mp.bound > 4);
-  let mp2 = Trace.mem_page t ~log:last ~start:(mp.bound - 3) ~count:100 in
-  check "last page short" (List.length mp2.cells = 3);
-  (* labels: ptr cell is labelled, array elements too *)
-  let all = Trace.mem_page t ~log:last ~start:0 ~count:mp.bound in
-  check "var label"
-    (List.exists (fun (c : Trace.cell) -> c.label = "ptr") all.cells);
-  check "elem label"
-    (List.exists
-       (fun (c : Trace.cell) -> c.label = "ptr[0]" && c.cvalue = "55")
-       all.cells);
-  (* typed search *)
-  (match Trace.mem_search t ~log:last ~query:"55" ~limit:2 with
-  | Some (cells, _) -> check "search 55" (List.length cells >= 1)
-  | None -> check "query parses" false);
-  check "bad query" (Trace.mem_search t ~log:last ~query:"abc" ~limit:5 = None);
-  (match Trace.mem_search t ~log:last ~query:"0" ~limit:3 with
-  | Some (cells, trunc) -> check "limit" (List.length cells = 3 && trunc)
-  | None -> check "query parses" false);
-  (* changed flag: last log differs from previous at exactly the written cell *)
-  let a = Trace.mem_page t ~log:last ~start:0 ~count:mp.bound in
-  let changed = List.filter (fun (c : Trace.cell) -> c.changed) a.cells in
-  check "few changes" (List.length changed >= 1 && List.length changed <= 2);
-  (* ---- filter *)
-  let c = Trace.set_filter t ~kinds:[ "call" ] ~text:"" in
-  check "filter kinds" (c > 0 && c < n);
-  let p = Trace.page t ~offset:0 ~limit:5 in
-  check "page rows are calls"
-    (List.for_all (fun (r : Trace.row) -> r.kind = "call") p);
-  let first = (List.hd p).index in
-  check "locate hit" (Trace.locate t first = 0);
-  check "locate miss" (Trace.locate t 0 = -1 && Trace.locate t (first + 1) = -2);
-  let c2 = Trace.set_filter t ~kinds:Trace.all_kinds ~text:"FIB_REC(" in
-  check "text filter" (c2 > 0);
-  let c3 = Trace.set_filter t ~kinds:Trace.all_kinds ~text:"" in
-  check "reset" (c3 = n && Trace.view_length t = n && Trace.locate t 7 = 7);
-  (* ---- log cap keeps partial trace and reports an error *)
+  check "fib: begin and end at the same depth"
+    (depth_of "inizio chiamata #1" = depth_of "fine chiamata #1")
+
+let test_pages () =
+  let _, t = run fib in
+  let n = Trace.length t in
+  let Trace.{ items; offset; total } = Trace.entries t ~offset:10 ~limit:5 in
+  check "page: window" (List.length items = 5 && offset = 10 && total = n);
+  check "page: indices"
+    (List.map (fun Trace.Entry.{ index } -> index) items
+    = [ 10; 11; 12; 13; 14 ]);
+  let Trace.{ items; offset } = Trace.entries t ~offset:(n + 100) ~limit:10 in
+  check "page: past the end gives the last page"
+    (offset = (n - 1) / 10 * 10 && List.length items = n - offset)
+
+let test_filter () =
+  let _, t = run fib in
+  let n = Trace.length t in
+  let calls = Trace.filter t ~kinds:[ Trace.Kind.Call ] ~query:"" in
+  let c = Trace.view_length calls in
+  check "filter: kinds" (c > 0 && c < n);
+  let Trace.{ items } = Trace.entries calls ~offset:0 ~limit:c in
+  check "filter: only calls"
+    (List.for_all (fun Trace.Entry.{ kind } -> kind = Trace.Kind.Call) items);
+  let first = (List.hd items).index in
+  check "position: hit" (Trace.position calls first = 0);
+  check "position: before the first entry" (Trace.position calls 0 = 0);
+  check "position: between entries" (Trace.position calls (first + 1) = 0);
+  let by_text = Trace.filter t ~kinds:Trace.Kind.all ~query:"  FIB_REC( " in
+  check "filter: query" (Trace.view_length by_text > 0);
+  let reset = Trace.filter calls ~kinds:Trace.Kind.all ~query:"" in
+  check "filter: reset"
+    (Trace.view_length reset = n && Trace.position reset 7 = 7)
+
+let test_vars () =
+  let _, t = run fib in
+  let last = Trace.length t - 1 in
+  let Trace.{ items = vars; total } =
+    Trace.vars t last ~query:"" ~offset:0 ~limit:100
+  in
+  let find id = List.find (fun Trace.Var.{ name } -> name = id) vars in
+  check "vars: count" (total = List.length vars);
+  check "vars: values" ((find "x").value = "55" && (find "y").value = "55");
+  check "vars: last change" ((find "ok").changed && not (find "x").changed);
+  check "vars: array"
+    ((find "ptr").ty = "int[]" && Option.is_some (find "ptr").array);
+  check "vars: function"
+    ((find "fib_rec").ty = "funzione" && (find "fib_rec").addr = None);
+  let Trace.{ items } = Trace.vars t last ~query:"fib" ~offset:0 ~limit:100 in
+  check "vars: query" (List.length items = 2);
+  let Trace.{ items } = Trace.vars t 0 ~query:"" ~offset:0 ~limit:100 in
+  check "vars: everything changed at the first log"
+    (List.for_all (fun Trace.Var.{ changed } -> changed) items)
+
+let test_memory () =
+  let _, t = run fib in
+  let last = Trace.length t - 1 in
+  let Trace.{ items; total } =
+    Trace.memory t last ~query:"" ~offset:0 ~limit:4
+  in
+  check "memory: page" (List.length items = 4 && total > 4);
+  let Trace.{ items = cells } =
+    Trace.memory t last ~query:"" ~offset:0 ~limit:total
+  in
+  let owned id = List.exists (fun Trace.Cell.{ owner } -> owner = id) cells in
+  check "memory: owners" (owned "ptr" && owned "ptr.length" && owned "ptr[0]");
+  check "memory: few changes"
+    (List.length (List.filter (fun Trace.Cell.{ changed } -> changed) cells) = 1);
+  let Trace.{ items } = Trace.memory t last ~query:"ptr" ~offset:0 ~limit:10 in
+  check "memory: query by owner" (List.length items = 3);
+  let Trace.{ items } = Trace.memory t last ~query:"55" ~offset:0 ~limit:10 in
+  check "memory: query by value"
+    (items <> []
+    && List.for_all (fun Trace.Cell.{ value } -> value = "55") items)
+
+let test_limits () =
   let res, t = run ~max_logs:50 fib in
-  check "capped" (Trace.length t = 50);
-  (match res with
-  | Error { Loc.it; _ } -> check "msg" (Trace.contains ~sub:"log limit" it)
-  | Ok _ -> check "should be error" false);
-  (* divergent program is stopped *)
+  check "limit: partial trace" (Trace.length t = 50);
+  check "limit: error" (error_contains ~sub:"log limit" res);
   let res, t = run ~max_logs:1000 "int n = 0; while (true) { n := n + 1; }" in
-  check "divergent stopped" (Result.is_error res && Trace.length t = 1000);
-  (* syntax / type errors give an empty trace *)
+  check "limit: divergent program" (Result.is_error res && Trace.length t = 1000);
   let res, t = run "int x = ;" in
-  check "parse error" (Result.is_error res && Trace.length t = 0);
-  (* formatter entry point: parse only *)
-  (match MaoLang.parse (Lexing.from_string "int x = true;") with
-  | Ok _ -> ()
-  | Error _ -> check "parse ignores types" false);
-  (match MaoLang.type_check (Lexing.from_string "int x = true;") with
-  | Error _ -> ()
-  | Ok _ -> check "type_check still checks" false);
+  check "parse error: empty trace" (Result.is_error res && Trace.length t = 0);
+  check "parse ignores types"
+    (Result.is_ok (MaoLang.parse (Lexing.from_string "int x = true;")));
+  check "type_check checks types"
+    (Result.is_error (MaoLang.type_check (Lexing.from_string "int x = true;")))
+
+let () =
+  test_locations ();
+  test_entries ();
+  test_pages ();
+  test_filter ();
+  test_vars ();
+  test_memory ();
+  test_limits ();
   print_endline "all trace tests passed"

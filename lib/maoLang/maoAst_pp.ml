@@ -69,7 +69,7 @@ let rec pp_expr fmt Loc.{ it = e } =
     | Var _ | Val _ | ArrayLoad _ | NewArrayDefault _ | NewArrayLiteral _
     | ArrayLength _ | Call _ | ExprBlock _ | Ternary _ ->
         true
-    | BinOp _ | UnOp _ | Cast _  -> false
+    | BinOp _ | UnOp _ | Cast _ -> false
   in
   let pp_inner fmt e =
     if is_atomic (Loc.get_item e) then pp_expr fmt e

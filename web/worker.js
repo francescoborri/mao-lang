@@ -10,8 +10,8 @@
 //                    { id, ok: true,  result }
 //                    { id, ok: false, error }
 //   page -> worker   { id, op, args }      op is a function of the global `Mao`
-//                                          (run, format, filter, logs, row,
-//                                          env, memory, memSearch)
+//                                          (run, format, filter, logs,
+//                                          position, env, memory)
 
 let failed = false;
 
