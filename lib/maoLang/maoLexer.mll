@@ -34,7 +34,7 @@ let double = digit+ '.' digit+ | digit+ '.' | '.' digit+
 
 let char = '\'' ['a'-'z' 'A'-'Z' '0'-'9'] '\''
 
-let string = ([' '-'!' '#'-'~'] | '\n' | '\t')*
+let string = ([' '-'!' '#'-'~'] | '\t')*
 
 let ident = ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
