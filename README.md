@@ -39,9 +39,9 @@ python3 -m http.server -d _site 8000
 
 ## Future improvements
 
-[ ] Closures for functions and procedures.
-[ ] Synctactic sugar for convenient constructs (`else if`, `for` loops, etc.).
-[ ] Better comments handling: up to now they are discarded by the lexer, which cause the formatter to remove them from the formatted program.
+- [ ] Closures for functions and procedures.
+- [ ] Synctactic sugar for convenient constructs (`else if`, `for` loops, etc.).
+- [ ] Better comments handling: up to now they are discarded by the lexer, which cause the formatter to remove them from the formatted program.
 
 ## Authors
 
