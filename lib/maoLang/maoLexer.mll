@@ -34,7 +34,7 @@ let double = digit+ '.' digit+ | digit+ '.' | '.' digit+
 
 let char = '\'' ['a'-'z' 'A'-'Z' '0'-'9'] '\''
 
-let string = ([' '-'~'] | '\n' | '\t')*
+let string = ([' '-'!' '#'-'~'] | '\n' | '\t')*
 
 let ident = ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
@@ -107,3 +107,4 @@ and comment = parse
 | new_line { Lexing.new_line lexbuf; comment lexbuf }
 | eof { unterminated_comment_error lexbuf }
 | _ { comment lexbuf }
+
