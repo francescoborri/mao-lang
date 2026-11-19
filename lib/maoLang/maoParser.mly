@@ -33,6 +33,7 @@
 %left EQ NEQ LT LEQ GT GEQ
 %left PLUS MINUS
 %left TIMES DIV MOD
+%nonassoc UMINUS
 
 %%
 
@@ -58,6 +59,11 @@ base_val:
 | b = BOOL { l $loc @@ BoolVal b }
 | c = CHAR { l $loc @@ CharVal c }
 
+signed_val:
+| v = base_val { v }
+| MINUS i = INT { l $loc @@ IntVal (-i) }
+| MINUS d = DOUBLE { l $loc @@ DoubleVal (-.d) }
+
 typed_var:
 | t = mao_type id = IDENT { t, id }
 
@@ -68,7 +74,7 @@ atom_expr:
 | id = IDENT LBRACKET e = expr RBRACKET { l $loc @@ ArrayLoad (id, e) }
 | id = IDENT DOT LENGTH { l $loc @@ ArrayLength id }
 | NEW t = base_type LBRACKET e = expr RBRACKET { l $loc @@ NewArrayDefault (t, e) }
-| LBRACKET vs = separated_nonempty_list(COMMA, base_val) RBRACKET { l $loc @@ NewArrayLiteral vs }
+| LBRACKET vs = separated_nonempty_list(COMMA, signed_val) RBRACKET { l $loc @@ NewArrayLiteral vs }
 | s = STRING { l $loc @@ NewArrayLiteral (unpack_string $loc s) }
 | t = mao_type LPAREN e = expr RPAREN { l $loc @@ Cast (t, e) }
 | LBRACE RETURN e = expr SEMICOLON RBRACE { e }
@@ -92,7 +98,7 @@ expr:
 | e1 = expr op = GT e2 = expr { l $loc @@ BinOp (e1, Gt, e2) }
 | e1 = expr op = GEQ e2 = expr { l $loc @@ BinOp (e1, Geq, e2) }
 | op = NOT e = expr { l $loc @@ UnOp (Not, e) }
-| op = MINUS e = expr { l $loc @@ UnOp (Neg, e) }
+| MINUS e = expr %prec UMINUS { l $loc @@ UnOp (Neg, e) }
 | a = atom_expr { a }
 
 decl_lhs:
