@@ -27,7 +27,7 @@ type bin_op =
 type un_op = Neg | Not
 
 type base_val_node =
-  | IntVal of int
+  | IntVal of Int64.t
   | BoolVal of bool
   | DoubleVal of float
   | CharVal of char
@@ -92,4 +92,4 @@ and checked_command_node =
   | CBlock of checked_command
   | CProc of string * typed_var list * checked_command
   | CInvoke of string * checked_expr list
-  | CFunc of string * typed_var list * mao_type * checked_expr
+  | CFunc of string * typed_var list * checked_expr

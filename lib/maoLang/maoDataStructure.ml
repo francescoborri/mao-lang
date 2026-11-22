@@ -7,19 +7,19 @@ module type Addr = sig
 
   val zero : t
   val next : t -> t
-  val offset : t -> int -> t
+  val offset : t -> Int64.t -> t
   val compare : t -> t -> int
   val pp : t Fmt.t
 end
 
-module IntAddr = struct
-  type t = int
+module Int64Addr = struct
+  type t = Int64.t
 
-  let zero = 0
-  let next x = x + 1
-  let offset x n = x + n
-  let compare = compare
-  let pp fmt = Fmt.pf fmt "0x%x"
+  let zero = 0L
+  let next x = Int64.succ x
+  let offset x n = Int64.add x n
+  let compare = Int64.compare
+  let pp fmt = Fmt.pf fmt "0x%Lx"
 end
 
 module MemMap = struct
@@ -51,6 +51,7 @@ module MemMap = struct
     let get addr m = M.find_opt addr m.map
 
     let set addr v m =
+      let max x y = if Addr.compare x y > 0 then x else y in
       { map = M.add addr v m.map; next_addr = max m.next_addr (Addr.next addr) }
 
     let next_addr m = m.next_addr
@@ -68,24 +69,24 @@ end
 
 module RTVal = struct
   type t =
-    | Int of int
+    | Int of Int64.t
     | Bool of bool
     | Double of float
     | Char of char
-    | Addr of IntAddr.t
+    | Addr of Int64Addr.t
 
   let default_from_type = function
-    | IntType -> Int 0
+    | IntType -> Int 0L
     | BoolType -> Bool false
     | DoubleType -> Double 0.0
     | CharType -> Char '\000'
 
   let pp fmt = function
-    | Int i -> Fmt.pf fmt "%d" i
+    | Int i -> Fmt.string fmt (Int64.to_string i)
     | Bool b -> Fmt.pf fmt "%b" b
     | Double d -> Fmt.string fmt (shortest_float_string d)
-    | Char c -> Fmt.pf fmt "'%c'" c
-    | Addr addr -> IntAddr.pp fmt addr
+    | Char c -> Fmt.pf fmt "'%s'" (escape_char c)
+    | Addr addr -> Int64Addr.pp fmt addr
 
   let pp_type fmt = function
     | Int _ -> Fmt.pf fmt "%a" pp_base_type IntType
@@ -95,11 +96,12 @@ module RTVal = struct
     | Addr _ -> Fmt.string fmt "array"
 end
 
+module StringSet = Set.Make (String)
 module Env = Map.Make (String)
-module Mem = MemMap.Make (IntAddr)
+module Mem = MemMap.Make (Int64Addr)
 
 type binding =
-  | Addr of IntAddr.t
+  | Addr of Int64Addr.t
   | LambdaFun of typed_var list * checked_expr
   | LambdaProc of typed_var list * checked_command
 
@@ -109,10 +111,8 @@ type state = { env : env; mem : mem }
 
 type event =
   | EDeclare of mao_type * string * RTVal.t
-  | EDeclares of mao_type * string * RTVal.t
   | EAssign of string * RTVal.t
-  | EAssigns of string * RTVal.t
-  | EArrayStore of string * int * RTVal.t * IntAddr.t
+  | EArrayStore of string * Int64.t * RTVal.t * Int64Addr.t
   | EIfThenElse of bool
   | EWhile of bool
   | EFunc of string

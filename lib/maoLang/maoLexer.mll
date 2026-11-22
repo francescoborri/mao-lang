@@ -1,23 +1,46 @@
 {
   open MaoParser
+  open Utils
 
   exception Error of string Loc.t
 
-  let unexpected_char_error lexbuf c =
-    raise
-      (Error
-         (Loc.with_positions
-            ~start_pos:(Lexing.lexeme_start_p lexbuf)
-            ~end_pos:(Lexing.lexeme_end_p lexbuf)
-            (Fmt.str "unexpected character '%c'" c)))
+  let raise_lexer_error lexbuf ?(start_pos = Lexing.lexeme_start_p lexbuf)
+      ?(end_pos = Lexing.lexeme_end_p lexbuf) fmt =
+    let raise_error msg =
+      raise (Error (Loc.with_positions ~start_pos ~end_pos msg))
+    in
+    Fmt.kstr raise_error fmt
 
-  let unterminated_comment_error lexbuf =
-    raise
-      (Error
-         (Loc.with_positions
-            ~start_pos:(Lexing.lexeme_start_p lexbuf)
-            ~end_pos:(Lexing.lexeme_end_p lexbuf)
-            (Fmt.str "unterminated block comment")))
+  let non_ascii_error lexbuf c =
+    let end_pos = Lexing.lexeme_end_p lexbuf in
+    let start_pos =
+      { end_pos with pos_cnum = end_pos.pos_cnum - String.length c }
+    in
+    raise_lexer_error lexbuf "carattere non ASCII '%s' non ammesso" ~start_pos
+      ~end_pos c
+
+  let parse_int lexbuf =
+    match Int64.of_string_opt (Lexing.lexeme lexbuf) with
+    | Some i -> i
+    | None ->
+        raise_lexer_error lexbuf "letterale intero '%s' troppo grande"
+          (Lexing.lexeme lexbuf)
+
+  let unescape_char = function
+    | 'n' -> '\n'
+    | 't' -> '\t'
+    | '0' -> '\000'
+    | c -> c
+
+  let unescape =
+    let aux (acc, escaping) c =
+      if escaping then (unescape_char c :: acc, false)
+      else if c = '\\' then (acc, true)
+      else (c :: acc, false)
+    in
+    String.to_seq
+    >> Seq.fold_left aux ([], false)
+    >> fst >> List.rev >> List.to_seq >> String.of_seq
 }
 
 let new_line = '\n' | "\r\n"
@@ -32,25 +55,27 @@ let bool = "true" | "false"
 
 let double = digit+ '.' digit+ | digit+ '.' | '.' digit+
 
-let char = '\'' ['a'-'z' 'A'-'Z' '0'-'9'] '\''
+let escape = '\\' ['n' 't' '0' '\\' '\'' '"']
 
-let string = ([' '-'!' '#'-'~'] | '\t')*
+let char = '\'' ([' '-'&' '('-'[' ']'-'~'] | escape) '\''
+
+let string = ([' '-'!' '#'-'[' ']'-'~'] | '\t' | escape)*
 
 let ident = ['a'-'z' 'A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
-let line_comment = "//" [^'\n' '\r']*
+let non_ascii = ['\192'-'\255'] ['\128'-'\191']* | ['\128'-'\191']
+
+let line_comment = "//" [^'\n' '\r' '\128'-'\255']*
 
 let open_multiline_comment = "/*"
 
 let close_multiline_comment = "*/"
 
 rule read = parse
-(* Blank characters and comments *)
 | new_line { Lexing.new_line lexbuf; read lexbuf }
 | white { read lexbuf }
 | line_comment { read lexbuf }
 | open_multiline_comment { comment lexbuf; read lexbuf }
-(* Operators and symbols *)
 | "+" { PLUS }
 | "-" { MINUS }
 | "*" { TIMES }
@@ -66,7 +91,6 @@ rule read = parse
 | "<" { LT }
 | ">=" { GEQ }
 | ">" { GT }
-(* Keywords *)
 | "int" { INT_TYPE }
 | "bool" { BOOL_TYPE }
 | "double" { DOUBLE_TYPE }
@@ -76,12 +100,10 @@ rule read = parse
 | "else" { ELSE }
 | "while" { WHILE }
 | "new" { NEW }
-| "length" { LENGTH }
 | "return" { RETURN }
-(* Symbols and delimiters *)
+| "." white* "length" { DOT_LENGTH }
 | "=" { DECLARE }
 | ":=" { ASSIGN }
-| "." { DOT }
 | "," { COMMA }
 | ";" { SEMICOLON }
 | ":" { COLON }
@@ -92,19 +114,26 @@ rule read = parse
 | "]" { RBRACKET }
 | "{" { LBRACE }
 | "}" { RBRACE }
-(* Literals and identifiers *)
-| int { INT (int_of_string (Lexing.lexeme lexbuf)) }
+| int { INT (parse_int lexbuf) }
 | bool { BOOL (bool_of_string (Lexing.lexeme lexbuf)) }
 | double { DOUBLE (float_of_string (Lexing.lexeme lexbuf)) }
-| char { CHAR (String.get (Lexing.lexeme lexbuf) 1) }
-| '"' (string as s) '"' { STRING s }
+| char { CHAR (String.get (unescape (Lexing.lexeme lexbuf)) 1) }
+| '"' (string as s) '"' { STRING (unescape s) }
 | ident { IDENT (Lexing.lexeme lexbuf) }
 | eof { EOF }
-| _ as c { unexpected_char_error lexbuf c }
+| "." { raise_lexer_error lexbuf "dopo '.' è ammesso solo 'length'" }
+| '\'' '\\' (_ as c) '\'' { raise_lexer_error lexbuf "sequenza di escape '\\%c' non valida" c }
+| '\'' (non_ascii as c) { non_ascii_error lexbuf c }
+| '\'' { raise_lexer_error lexbuf "carattere letterale non valido" }
+| '"' string '\\' (_ as c) { raise_lexer_error lexbuf "sequenza di escape '\\%c' non valida" c }
+| '"' string (non_ascii as c) { non_ascii_error lexbuf c }
+| '"' string { raise_lexer_error lexbuf "stringa non terminata" }
+| non_ascii as c { non_ascii_error lexbuf c }
+| _ as c { raise_lexer_error lexbuf "carattere '%s' inatteso" (Char.escaped c) }
 
 and comment = parse
 | close_multiline_comment { () }
 | new_line { Lexing.new_line lexbuf; comment lexbuf }
-| eof { unterminated_comment_error lexbuf }
+| non_ascii as c { non_ascii_error lexbuf c }
+| eof { raise_lexer_error lexbuf "commento non terminato" }
 | _ { comment lexbuf }
-

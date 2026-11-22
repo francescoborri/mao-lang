@@ -1,12 +1,12 @@
 # mao-lang
 
-Web interpreter for the *MAO* (acroynim for ***M**odello **A**stratto **O**perazionale* in italian) language, a simple didactical imperative language taught in the course of *Programmazione & Algoritmica* at the 1st year of the Computer Science degree at the University of Pisa.
+Web interpreter for the *MAO* (acronym for ***M**odello **A**stratto **O**perazionale* in Italian) language, a simple didactic imperative language taught in the course of *Programmazione & Algoritmica* at the 1st year of the Computer Science degree at the University of Pisa.
 
 The core interpreter is written in OCaml and can be run from the command line, but there's also a web version which uses the OCaml to WebAssembly compiler to run the interpreter in the browser; it is available at [https://francescoborri.github.io/mao-lang](https://francescoborri.github.io/mao-lang) and includes also a convenient trace feature to inspect the execution and the state of the program step-by-step.
 
 ## Building and running
 
-The prohect uses [OCaml](https://ocaml.org/) and [Dune](https://dune.build/) as build system, and [OPAM](https://opam.ocaml.org/) to manage dependencies. You can install them on your system following the instructions on their respective websites.
+The project uses [OCaml](https://ocaml.org/) and [Dune](https://dune.build/) as build system, and [OPAM](https://opam.ocaml.org/) to manage dependencies. You can install them on your system following the instructions on their respective websites.
 Clone the repository and create a local OPAM switch with the project dependencies installed:
 
 ```bash
@@ -16,10 +16,10 @@ opam switch create . --deps-only --with-dev-setup
 eval $(opam env)
 ```
 
-Build the project and run it on a sample `.mao` program:
+Build the project, run the tests and try it on a sample `.mao` program:
 
 ```bash
-dune build
+dune build @runtest
 cat sample/fib.mao | dune exec mao_run
 ```
 
@@ -40,8 +40,8 @@ python3 -m http.server -d _site 8000
 ## Future improvements
 
 - [ ] Closures for functions and procedures.
-- [ ] Synctactic sugar for convenient constructs (`else if`, `for` loops, etc.).
-- [ ] Better comments handling: up to now they are discarded by the lexer, which cause the formatter to remove them from the formatted program.
+- [ ] Syntactic sugar for convenient constructs (`else if`, `for` loops, etc.).
+- [ ] Better comments handling: up to now they are discarded by the lexer, which causes the formatter to remove them from the formatted program.
 
 ## Authors
 

@@ -1,4 +1,4 @@
-ordina_binaria(int[] a) {          
+ordina_binaria(int[] a) {
     int i, j;
     while (i < a.length) {
         if (a[i] == 0) {

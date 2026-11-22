@@ -1,10 +1,10 @@
-int trova_mancante(int[] a) {      
+int trova_mancante(int[] a) {
     int n = a.length;
-    int somma = ((n + 1) * (n + 2)) / 2;
-    int i, s;
+    int totale = ((n + 1) * (n + 2)) / 2;
+    int i, somma;
     while (i < n) {
-        s, i := s + a[i], i + 1;
+        somma, i := somma + a[i], i + 1;
     }
-    return (somma - s);
+    return (totale - somma);
 }
-int result = trova_mancante([2, 3, 1, 5]);
+int r = trova_mancante([2, 3, 1, 5]);

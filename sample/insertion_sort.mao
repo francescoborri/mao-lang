@@ -3,7 +3,7 @@ insertion_sort(int[] a) {
     while (i < a.length) {
         int item = a[i];
         int j = i - 1;
-        while (j >= 0 && a[j] > item) {
+        while ((j >= 0) && (a[j] > item)) {
             a[j + 1] := a[j];
             j := j - 1;
         }

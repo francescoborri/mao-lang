@@ -1,3 +1,0 @@
-(library
- (name writerResultMonad)
- (modules writerResultMonad))

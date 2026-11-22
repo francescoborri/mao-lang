@@ -10,18 +10,18 @@
 %}
 
 %token <string> IDENT
-%token <int> INT
+%token <Int64.t> INT
 %token <float> DOUBLE
 %token <bool> BOOL
 %token <char> CHAR
 %token <string> STRING
 %token INT_TYPE BOOL_TYPE DOUBLE_TYPE CHAR_TYPE
 %token SKIP ASSIGN DECLARE IF ELSE WHILE
-%token NEW LENGTH RETURN
+%token NEW RETURN
 %token PLUS MINUS TIMES DIV MOD
 %token AND OR XOR NOT
 %token EQ NEQ LT LEQ GT GEQ
-%token DOT COMMA SEMICOLON COLON QUESTION_MARK EOF
+%token DOT_LENGTH COMMA SEMICOLON COLON QUESTION_MARK EOF
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE
 
 %start <command> program
@@ -61,7 +61,7 @@ base_val:
 
 signed_val:
 | v = base_val { v }
-| MINUS i = INT { l $loc @@ IntVal (-i) }
+| MINUS i = INT { l $loc @@ IntVal (Int64.neg i) }
 | MINUS d = DOUBLE { l $loc @@ DoubleVal (-.d) }
 
 typed_var:
@@ -72,7 +72,7 @@ atom_expr:
 | v = base_val { l $loc @@ Val v }
 | id = IDENT LPAREN es = separated_list(COMMA, expr) RPAREN { l $loc @@ Call (id, es) }
 | id = IDENT LBRACKET e = expr RBRACKET { l $loc @@ ArrayLoad (id, e) }
-| id = IDENT DOT LENGTH { l $loc @@ ArrayLength id }
+| id = IDENT DOT_LENGTH { l $loc @@ ArrayLength id }
 | NEW t = base_type LBRACKET e = expr RBRACKET { l $loc @@ NewArrayDefault (t, e) }
 | LBRACKET vs = separated_nonempty_list(COMMA, signed_val) RBRACKET { l $loc @@ NewArrayLiteral vs }
 | s = STRING { l $loc @@ NewArrayLiteral (unpack_string $loc s) }
@@ -83,21 +83,21 @@ atom_expr:
 | LPAREN e = expr RPAREN { e }
 
 expr:
-| e1 = expr op = PLUS e2 = expr { l $loc @@ BinOp (e1, Add, e2) }
-| e1 = expr op = MINUS e2 = expr { l $loc @@ BinOp (e1, Sub, e2) }
-| e1 = expr op = TIMES e2 = expr { l $loc @@ BinOp (e1, Mul, e2) }
-| e1 = expr op = DIV e2 = expr { l $loc @@ BinOp (e1, Div, e2) }
-| e1 = expr op = MOD e2 = expr { l $loc @@ BinOp (e1, Mod, e2) }
-| e1 = expr op = AND e2 = expr { l $loc @@ BinOp (e1, And, e2) }
-| e1 = expr op = OR e2 = expr { l $loc @@ BinOp (e1, Or, e2) }
-| e1 = expr op = XOR e2 = expr { l $loc @@ BinOp (e1, Xor, e2) }
-| e1 = expr op = EQ e2 = expr { l $loc @@ BinOp (e1, Eq, e2) }
-| e1 = expr op = NEQ e2 = expr { l $loc @@ BinOp (e1, Neq, e2) }
-| e1 = expr op = LT e2 = expr { l $loc @@ BinOp (e1, Lt, e2) }
-| e1 = expr op = LEQ e2 = expr { l $loc @@ BinOp (e1, Leq, e2) }
-| e1 = expr op = GT e2 = expr { l $loc @@ BinOp (e1, Gt, e2) }
-| e1 = expr op = GEQ e2 = expr { l $loc @@ BinOp (e1, Geq, e2) }
-| op = NOT e = expr { l $loc @@ UnOp (Not, e) }
+| e1 = expr PLUS e2 = expr { l $loc @@ BinOp (e1, Add, e2) }
+| e1 = expr MINUS e2 = expr { l $loc @@ BinOp (e1, Sub, e2) }
+| e1 = expr TIMES e2 = expr { l $loc @@ BinOp (e1, Mul, e2) }
+| e1 = expr DIV e2 = expr { l $loc @@ BinOp (e1, Div, e2) }
+| e1 = expr MOD e2 = expr { l $loc @@ BinOp (e1, Mod, e2) }
+| e1 = expr AND e2 = expr { l $loc @@ BinOp (e1, And, e2) }
+| e1 = expr OR e2 = expr { l $loc @@ BinOp (e1, Or, e2) }
+| e1 = expr XOR e2 = expr { l $loc @@ BinOp (e1, Xor, e2) }
+| e1 = expr EQ e2 = expr { l $loc @@ BinOp (e1, Eq, e2) }
+| e1 = expr NEQ e2 = expr { l $loc @@ BinOp (e1, Neq, e2) }
+| e1 = expr LT e2 = expr { l $loc @@ BinOp (e1, Lt, e2) }
+| e1 = expr LEQ e2 = expr { l $loc @@ BinOp (e1, Leq, e2) }
+| e1 = expr GT e2 = expr { l $loc @@ BinOp (e1, Gt, e2) }
+| e1 = expr GEQ e2 = expr { l $loc @@ BinOp (e1, Geq, e2) }
+| NOT e = expr { l $loc @@ UnOp (Not, e) }
 | MINUS e = expr %prec UMINUS { l $loc @@ UnOp (Neg, e) }
 | a = atom_expr { a }
 
@@ -132,4 +132,5 @@ command:
 | id = IDENT LPAREN ds = decl_lhs RPAREN LBRACE cs = commands RBRACE { l $loc @@ Proc (id, ds, cs) }
 | id = IDENT LPAREN es = separated_nonempty_list(COMMA, expr) RPAREN SEMICOLON
   { l $loc @@ Invoke (id, es) }
+| t = mao_type id = IDENT LPAREN RPAREN e = expr { l $loc @@ Func (id, [], t, e) }
 | t = mao_type id = IDENT LPAREN ds = decl_lhs RPAREN e = expr { l $loc @@ Func (id, ds, t, e) }

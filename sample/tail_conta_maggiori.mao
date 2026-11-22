@@ -1,15 +1,15 @@
 int tail_conta_maggiori(int[] a, int k) {
-    int aux_tail_conta_maggiori(int[] a, int k, int i, int acc) {
-        int result = acc;
+    int aux(int[] a, int k, int i, int acc) {
+        int r = acc;
         if (i < a.length) {
             if (a[i] > k) {
-                result := aux_tail_conta_maggiori(a, k, i + 1, acc + 1);
+                r := aux(a, k, i + 1, acc + 1);
             } else {
-                result := aux_tail_conta_maggiori(a, k, i + 1, acc);
+                r := aux(a, k, i + 1, acc);
             }
         }
-        return result;
+        return r;
     }
-    return aux_tail_conta_maggiori(a, k, 0, 0);
+    return aux(a, k, 0, 0);
 }
-int result = tail_conta_maggiori([3, 2, 5, 1, 6, 4], 3);
+int r = tail_conta_maggiori([3, 2, 5, 1, 6, 4], 3);

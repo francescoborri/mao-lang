@@ -2,7 +2,16 @@
  (modules maoLexer))
 
 (menhir
- (modules maoParser))
+ (modules maoParser)
+ (flags --table))
+
+(rule
+ (targets maoParser_messages.ml)
+ (deps maoParser.messages maoParser.mly)
+ (action
+  (with-stdout-to
+   %{targets}
+   (run menhir --compile-errors maoParser.messages maoParser.mly))))
 
 (library
  (name maoLang)
@@ -14,8 +23,9 @@
   maoDataStructure_pp
   maoLexer
   maoParser
+  maoParser_messages
   maoTypeChecker
   maoInterpreter
   maoTrace)
  (modules_without_implementation maoAst)
- (libraries fmt loc writerResultMonad utils))
+ (libraries fmt loc menhirLib readerStateResultMonad utils))

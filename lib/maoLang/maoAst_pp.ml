@@ -43,11 +43,21 @@ let pp_bin_op fmt = function
   | Leq -> Fmt.string fmt "<="
   | Geq -> Fmt.string fmt ">="
 
+let escape_char c =
+  match c with
+  | '\n' -> "\\n"
+  | '\t' -> "\\t"
+  | '\\' -> "\\\\"
+  | '\'' -> "\\'"
+  | '\"' -> "\\\""
+  | '\000' -> "\\0"
+  | c -> String.make 1 c
+
 let pp_base_val fmt Loc.{ it = v } =
   match v with
-  | IntVal i -> Fmt.pf fmt "%d" i
+  | IntVal i -> Fmt.string fmt (Int64.to_string i)
   | BoolVal b -> Fmt.pf fmt "%b" b
-  | CharVal c -> Fmt.pf fmt "'%c'" c
+  | CharVal c -> Fmt.pf fmt "'%s'" (escape_char c)
   | DoubleVal d -> Fmt.string fmt (shortest_float_string d)
 
 let pp_un_op fmt = function
@@ -56,7 +66,7 @@ let pp_un_op fmt = function
 
 let pp_decl_lhs fmt ds =
   match ds with
-  | [] -> unreachable "Declaration must have at least one variable"
+  | [] -> unreachable "dichiarazione senza variabili"
   | x :: [] -> pp_typed_var fmt x
   | (t, x) :: xs when List.for_all (fun (t', _) -> t = t') xs ->
       Fmt.pf fmt "%a %a" pp_mao_type t
@@ -83,11 +93,11 @@ let rec pp_expr fmt Loc.{ it = e } =
   | UnOp (op, e) -> Fmt.pf fmt "%a%a" pp_un_op op pp_inner e
   | ArrayLoad (id, e) -> Fmt.pf fmt "%s[%a]" id pp_expr e
   | NewArrayDefault (t, e) -> Fmt.pf fmt "new %a[%a]" pp_base_type t pp_expr e
-  | NewArrayLiteral ({ it = CharVal c } :: _ as cs) ->
+  | NewArrayLiteral ({ it = CharVal _ } :: _ as cs) ->
       let pp_base_val fmt Loc.{ it = c } =
         match c with
-        | CharVal c -> Fmt.pf fmt "%c" c
-        | _ -> unreachable "expected a char"
+        | CharVal c -> Fmt.pf fmt "%s" (escape_char c)
+        | _ -> unreachable "atteso un carattere"
       in
       Fmt.pf fmt "\"%a\"" Fmt.(list ~sep:nop pp_base_val) cs
   | NewArrayLiteral vs ->

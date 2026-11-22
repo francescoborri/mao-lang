@@ -5,8 +5,6 @@ selection_sort(int[] a) {
         while (j < a.length) {
             if (a[j] < a[min]) {
                 min := j;
-            } else {
-                skip;
             }
             j := j + 1;
         }

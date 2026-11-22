@@ -7,27 +7,59 @@ open Result.Syntax
 let error_with_loc ~loc fmt = Fmt.kstr (Loc.with_loc ~loc >> Result.error) fmt
 
 let undefined_variable_error ~loc id =
-  error_with_loc ~loc "undefined variable '%s'" id
+  error_with_loc ~loc "'%s' non è stato dichiarato" id
 
 let type_error ~loc expected got =
-  error_with_loc ~loc "expected %a but got %a" pp_mao_type expected pp_mao_type
-    got
+  error_with_loc ~loc "atteso il tipo %a, trovato %a" pp_mao_type expected
+    pp_mao_type got
 
 let expected_array_error ~loc id t =
-  error_with_loc ~loc "expected '%s' to be an array but got %a" id pp_mao_type t
+  error_with_loc ~loc "'%s' dovrebbe essere un array, ma ha tipo %a" id
+    pp_mao_type t
 
 let expected_function_error ~loc id t =
-  error_with_loc ~loc "expected '%s' to be a function but got %a" id pp_mao_type
-    t
+  error_with_loc ~loc "'%s' dovrebbe essere una funzione, ma ha tipo %a" id
+    pp_mao_type t
+
+let expected_procedure_error ~loc id t =
+  error_with_loc ~loc "'%s' dovrebbe essere una procedura, ma ha tipo %a" id
+    pp_mao_type t
+
+let not_a_variable_error ~loc id = function
+  | FuncType (_, Some _) ->
+      error_with_loc ~loc "'%s' è una funzione, non una variabile" id
+  | _ -> error_with_loc ~loc "'%s' è una procedura, non una variabile" id
+
+let arity_error ~loc kind id ~expected ~got =
+  error_with_loc ~loc
+    "numero di argomenti errato per la %s '%s': attesi %d, passati %d" kind id
+    expected got
+
+let count_error ~loc ~expected ~got =
+  error_with_loc ~loc "numero di espressioni errato: attese %d, trovate %d"
+    expected got
+
+let duplicate_parameter_error ~loc kind f_id id =
+  error_with_loc ~loc "parametro '%s' ripetuto nella %s '%s'" id kind f_id
 
 let cast_error ~loc t1 t2 =
-  error_with_loc ~loc "cannot cast from %a to %a" pp_mao_type t1 pp_mao_type t2
+  error_with_loc ~loc "impossibile convertire da %a a %a" pp_mao_type t1
+    pp_mao_type t2
 
 let default_value ~loc = function
-  | IntType -> Loc.with_loc ~loc (CVal { it = IntVal 0; at = loc })
+  | IntType -> Loc.with_loc ~loc (CVal { it = IntVal 0L; at = loc })
   | BoolType -> Loc.with_loc ~loc (CVal { it = BoolVal false; at = loc })
   | DoubleType -> Loc.with_loc ~loc (CVal { it = DoubleVal 0.0; at = loc })
   | CharType -> Loc.with_loc ~loc (CVal { it = CharVal '\000'; at = loc })
+
+let check_duplicate_names ids err_cont =
+  let rec aux seen = function
+    | [] -> Result.ok ()
+    | id :: ids when not (StringSet.mem id seen) ->
+        aux (StringSet.add id seen) ids
+    | id :: _ -> err_cont id
+  in
+  aux StringSet.empty ids
 
 let check_bin_op ~e1_loc ~e2_loc op t1 t2 =
   match (op, t1, t2) with
@@ -84,7 +116,9 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
       Result.ok (BaseType CharType, Loc.with_loc ~loc (CVal v))
   | Var id -> (
       match Env.find_opt id env with
-      | Some t -> Result.ok (t, Loc.with_loc ~loc (CVar id))
+      | Some (BaseType _ as t) | Some (CompositeType _ as t) ->
+          Result.ok (t, Loc.with_loc ~loc (CVar id))
+      | Some (FuncType _ as t) -> not_a_variable_error ~loc id t
       | None -> undefined_variable_error ~loc id)
   | BinOp (e1, op, e2) ->
       let* t1, c_e1 = type_check_expr env e1 in
@@ -106,7 +140,7 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
       match t' with
       | BaseType IntType ->
           Result.ok (t, Loc.with_loc ~loc (CArrayLoad (id, c_e)))
-      | _ -> type_error ~loc (BaseType IntType) t')
+      | _ -> type_error ~loc:e.at (BaseType IntType) t')
   | NewArrayDefault (t, e) ->
       let* t', c_e = type_check_expr env e in
       let* () =
@@ -117,7 +151,7 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
       Result.ok
         (CompositeType (Array t), Loc.with_loc ~loc (CNewArrayDefault (t, c_e)))
   | NewArrayLiteral [] ->
-      error_with_loc ~loc "cannot create an empty literal array"
+      error_with_loc ~loc "un array letterale non può essere vuoto"
   | NewArrayLiteral (v :: vs) ->
       let* v_t, _ = type_check_expr env { it = Val v; at = v.at } in
       let+ t =
@@ -131,7 +165,7 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
       let base_t =
         match t with
         | BaseType t -> t
-        | _ -> unreachable "non-base type in array literal"
+        | _ -> unreachable "tipo non base in un array letterale"
       in
       ( CompositeType (Array base_t),
         Loc.with_loc ~loc (CNewArrayLiteral (v :: vs)) )
@@ -144,6 +178,9 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
   | Cast (t, e) -> (
       let* t', c_e = type_check_expr env e in
       match (t, t') with
+      | BaseType IntType, BaseType IntType
+      | BaseType DoubleType, BaseType DoubleType ->
+          Result.ok (t, c_e)
       | BaseType IntType, BaseType DoubleType
       | BaseType DoubleType, BaseType IntType ->
           Result.ok (t, Loc.with_loc ~loc (CCast (t, c_e)))
@@ -162,11 +199,9 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
           in
           let c_args = List.rev c_args in
           Result.ok (t, Loc.with_loc ~loc (CCall (id, c_args)))
-      | Some (FuncType (ts, Some t)) when List.length ts <> List.length args ->
-          error_with_loc ~loc "function '%s' expects %d arguments but got %d" id
-            (List.length ts) (List.length args)
-      | Some (FuncType (ts, None)) ->
-          expected_function_error ~loc id (FuncType (ts, None))
+      | Some (FuncType (ts, Some _)) ->
+          arity_error ~loc "funzione" id ~expected:(List.length ts)
+            ~got:(List.length args)
       | Some t -> expected_function_error ~loc id t
       | None -> undefined_variable_error ~loc id)
   | ExprBlock (c, e) ->
@@ -175,7 +210,8 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
       Result.ok (t, Loc.with_loc ~loc (CExprBlock (c_c, c_e)))
   | Ternary (e1, e2, e3) ->
       let* t1, c_e1 = type_check_expr env e1 in
-      if t1 <> BaseType BoolType then type_error ~loc (BaseType BoolType) t1
+      if t1 <> BaseType BoolType then
+        type_error ~loc:e1.at (BaseType BoolType) t1
       else
         let* t2, c_e2 = type_check_expr env e2 in
         let* t3, c_e3 = type_check_expr env e3 in
@@ -188,53 +224,49 @@ and type_check_command env { it = c; at = loc } =
   | Skip -> Result.ok (env, Loc.with_loc ~loc CSkip)
   | Declare (ds, None) ->
       let* env', c_es =
-        result_fold_leftM
-          (fun (env, c_es) (t, id) ->
+        result_fold_rightM
+          (fun (t, id) (env, c_es) ->
             match t with
             | BaseType bt ->
                 Result.ok (Env.add id t env, default_value ~loc bt :: c_es)
             | _ ->
                 error_with_loc ~loc
-                  "array type '%a' cannot be declared without an initializer"
+                  "una variabile di tipo %a deve essere inizializzata"
                   pp_mao_type t)
-          (env, []) ds
+          ds (env, [])
       in
-      let c_es = List.rev c_es in
       let c_c = CDeclare (List.combine ds c_es) in
       Result.ok (env', Loc.with_loc ~loc c_c)
   | Declare (ds, Some es) when List.length ds = List.length es ->
       let* env, c_es =
-        result_fold_left2M
-          (fun (env, c_es) (t, id) e ->
+        result_fold_right2M
+          (fun (t, id) e (env', c_es) ->
             let* t', c_e = type_check_expr env e in
-            if t = t' then Result.ok (Env.add id t env, c_e :: c_es)
+            if t = t' then Result.ok (Env.add id t env', c_e :: c_es)
             else type_error ~loc:e.at t t')
-          (env, []) ds es
+          ds es (env, [])
       in
-      let c_es = List.rev c_es in
       let c_c = CDeclare (List.combine ds c_es) in
       Result.ok (env, Loc.with_loc ~loc c_c)
   | Declare (ds, Some es) ->
-      error_with_loc ~loc "expected %d expressions but got %d" (List.length ds)
-        (List.length es)
+      count_error ~loc ~expected:(List.length ds) ~got:(List.length es)
   | Assign (ids, es) when List.length ids = List.length es ->
-      let* env, c_es =
-        result_fold_left2M
-          (fun (env, c_es) id e ->
+      let* c_es =
+        result_fold_right2M
+          (fun id e c_es ->
             match Env.find_opt id env with
-            | Some t ->
+            | Some (BaseType _ as t) | Some (CompositeType _ as t) ->
                 let* t', c_e = type_check_expr env e in
-                if t = t' then Result.ok (env, c_e :: c_es)
+                if t = t' then Result.ok (c_e :: c_es)
                 else type_error ~loc:e.at t t'
+            | Some (FuncType _ as t) -> not_a_variable_error ~loc id t
             | None -> undefined_variable_error ~loc id)
-          (env, []) ids es
+          ids es []
       in
-      let c_es = List.rev c_es in
       let c_c = CAssign (List.combine ids c_es) in
       Result.ok (env, Loc.with_loc ~loc c_c)
   | Assign (ids, es) ->
-      error_with_loc ~loc "expected %d expressions but got %d" (List.length ids)
-        (List.length es)
+      count_error ~loc ~expected:(List.length ids) ~got:(List.length es)
   | ArrayStore (id, e1, e2) -> (
       match Env.find_opt id env with
       | Some (CompositeType (Array t)) ->
@@ -252,32 +284,36 @@ and type_check_command env { it = c; at = loc } =
       Result.ok (env, Loc.with_loc ~loc (CSeq (c_c1, c_c2)))
   | IfThenElse (e, c1, c2) ->
       let* t, c_e = type_check_expr env e in
-      if t <> BaseType BoolType then type_error ~loc (BaseType BoolType) t
+      if t <> BaseType BoolType then type_error ~loc:e.at (BaseType BoolType) t
       else
         let* _, c_c1 = type_check_command env c1 in
         let* _, c_c2 = type_check_command env c2 in
         Result.ok (env, Loc.with_loc ~loc (CIfThenElse (c_e, c_c1, c_c2)))
   | While (e, c) ->
       let* t, c_e = type_check_expr env e in
-      if t <> BaseType BoolType then type_error ~loc (BaseType BoolType) t
+      if t <> BaseType BoolType then type_error ~loc:e.at (BaseType BoolType) t
       else
         let* _, c_c = type_check_command env c in
         Result.ok (env, Loc.with_loc ~loc (CWhile (c_e, c_c)))
   | Block c ->
       let* _, c_c = type_check_command env c in
       Result.ok (env, Loc.with_loc ~loc (CBlock c_c))
-  | Proc (id, ds, c) ->
-      let env' = Env.add id (FuncType (List.map fst ds, None)) Env.empty in
+  | Proc (f_id, ds, c) ->
+      let* () =
+        check_duplicate_names (List.map snd ds)
+          (duplicate_parameter_error ~loc "procedura" f_id)
+      in
+      let env' = Env.add f_id (FuncType (List.map fst ds, None)) Env.empty in
       let env' = List.fold_left (fun acc (t, id) -> Env.add id t acc) env' ds in
       let* _, c_c = type_check_command env' c in
-      let env = Env.add id (FuncType (List.map fst ds, None)) env in
-      Result.ok (env, Loc.with_loc ~loc (CProc (id, ds, c_c)))
+      let env = Env.add f_id (FuncType (List.map fst ds, None)) env in
+      Result.ok (env, Loc.with_loc ~loc (CProc (f_id, ds, c_c)))
   | Invoke (id, es) -> (
       match Env.find_opt id env with
       | Some (FuncType (ts, None)) ->
           if List.length ts <> List.length es then
-            error_with_loc ~loc "procedure '%s' expects %d arguments but got %d"
-              id (List.length ts) (List.length es)
+            arity_error ~loc "procedura" id ~expected:(List.length ts)
+              ~got:(List.length es)
           else
             let* c_es =
               result_fold_left2M
@@ -289,17 +325,19 @@ and type_check_command env { it = c; at = loc } =
             in
             let c_es = List.rev c_es in
             Result.ok (env, Loc.with_loc ~loc (CInvoke (id, c_es)))
-      | Some t ->
-          error_with_loc ~loc "expected '%s' to be a procedure but got %a" id
-            pp_mao_type t
+      | Some t -> expected_procedure_error ~loc id t
       | None -> undefined_variable_error ~loc id)
-  | Func (id, ds, t, e) ->
-      let env' = Env.add id (FuncType (List.map fst ds, Some t)) Env.empty in
+  | Func (f_id, ds, t, e) ->
+      let* () =
+        check_duplicate_names (List.map snd ds)
+          (duplicate_parameter_error ~loc "funzione" f_id)
+      in
+      let env' = Env.add f_id (FuncType (List.map fst ds, Some t)) Env.empty in
       let env' = List.fold_left (fun acc (t, id) -> Env.add id t acc) env' ds in
       let* t', c_e = type_check_expr env' e in
       if t = t' then
-        let env = Env.add id (FuncType (List.map fst ds, Some t)) env in
-        Result.ok (env, Loc.with_loc ~loc (CFunc (id, ds, t, c_e)))
+        let env = Env.add f_id (FuncType (List.map fst ds, Some t)) env in
+        Result.ok (env, Loc.with_loc ~loc (CFunc (f_id, ds, c_e)))
       else type_error ~loc:e.at t t'
 
 let type_check_program ast =

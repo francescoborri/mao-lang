@@ -1,4 +1,4 @@
-int azzera_negativi(int[] a) {      
+int azzera_negativi(int[] a) {
     int counter = 0;
     int i = 0;
     while (i < a.length) {
@@ -10,10 +10,4 @@ int azzera_negativi(int[] a) {
     }
     return counter;
 }
-int[] a = [1, -1, 2, -2, 3, -3];
-int result = azzera_negativi(a);
-int i;
-while (i < a.length) {
-    a[i] := a[i];
-    i := i + 1;
-}
+int r = azzera_negativi([1, -1, 2, -2, 3, -3]);

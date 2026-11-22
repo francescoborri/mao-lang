@@ -1,31 +1,16 @@
 "use strict";
-// Main-thread UI. All interpreter work happens in worker.js, and the whole
-// trace stays on the OCaml side: this file only ever holds the window of data
-// it is displaying (one page of logs, one page of memory, one environment).
-//
-//   - rpc(op, ...args)  request/response over postMessage
-//   - nav(type, job)    serial queue for navigation work; a newer job of the
-//                       same type replaces a pending one, so holding a key
-//                       down never builds a backlog in the worker
-//   - "Annulla" terminates the worker (the only way to stop a running wasm
-//     computation) and starts a fresh one.
-//   - the trace, the environment and the memory are paginated tables: each
-//     page is requested to the worker when shown (see makePager).
-//
-// Source locations are links to the editor:
-//   - the location of a log entry highlights its whole start-end range;
-//   - the location in an error message moves the cursor to its start/point.
 (() => {
   const $ = (id) => document.getElementById(id);
   const src = $("src"), marks = $("marks"), syntax = $("syntax"), gutter = $("gutter");
   const runBtn = $("run"), cancelBtn = $("cancel"), formatBtn = $("format");
-  const statusEl = $("status"), diagEl = $("diag"), maxLogsEl = $("maxLogs");
+  const statusEl = $("status"), diagEl = $("diag");
+  const maxLogsEl = $("maxLogs"), maxDepthEl = $("maxDepth");
 
   const KINDS = ["decl", "assign", "store", "branch", "def", "call", "invoke"];
   const KIND_LABEL = {
     decl: "dichiarazioni", assign: "assegnamenti", store: "scritture su array",
-    branch: "if / while", def: "definizioni", call: "chiamate di funzione",
-    invoke: "chiamate di procedura",
+    branch: "if / while", def: "funzioni e procedure", call: "chiamate di funzione",
+    invoke: "invocazioni di procedura",
   };
   const STORAGE_KEY = "mao.source";
   const INDENT = "    ";
@@ -45,34 +30,35 @@
     return e;
   }
 
-  // Prism grammar for Mao (mirrors maoLexer.mll). Order matters: the first
-  // matching rule wins, so keywords come before the "function call" rule.
   if (window.Prism) {
     Prism.languages.mao = {
       comment: { pattern: /\/\/[^\n\r]*|\/\*[\s\S]*?(?:\*\/|$)/, greedy: true },
-      string: { pattern: /"[^"\n]*"/, greedy: true },
-      char: /'[A-Za-z0-9]'/,
-      keyword: /\b(?:skip|if|else|while|new|return|length)\b/,
+      char: { pattern: /'(?:[^'\\\n]|\\[nt0\\'"])'/, greedy: true },
+      string: { pattern: /"(?:[^"\\\n]|\\[nt0\\'"])*"/, greedy: true },
+      keyword: [
+        /\b(?:skip|if|else|while|new|return)\b/,
+        { pattern: /(\.\s*)length\b/, lookbehind: true },
+      ],
       "class-name": /\b(?:int|bool|double|char)\b/,
       boolean: /\b(?:true|false)\b/,
       operator: /:=|&&|\|\||==|!=|<=|>=|\bxor\b|[-+*\/%!<>=?:]/,
-      number: /\b\d+\.\d*|\b\d+\b/,
-      function: /\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()/,
+      number: /\b\d+\.\d*|\.\d+|\b\d+\b/,
+      function: /\b[A-Za-z][A-Za-z0-9_]*(?=\s*\()/,
       punctuation: /[()[\]{},;.]/,
     };
   }
 
-  // The formatter works on the AST, which does not keep comments: it would
-  // silently delete them. Detect them (skipping string and char literals).
   function hasComments(text) {
     for (let i = 0; i < text.length; i++) {
       const c = text[i];
       if (c === '"') {
-        const j = text.indexOf('"', i + 1);
-        if (j < 0) return false;
+        let j = i + 1;
+        while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+        if (j >= text.length) return false;
         i = j;
-      } else if (c === "'" && text[i + 2] === "'") {
-        i += 2;
+      } else if (c === "'") {
+        const len = text[i + 1] === "\\" ? 4 : 3;
+        if (text[i + len - 1] === "'") i += len - 1;
       } else if (c === "/" && (text[i + 1] === "/" || text[i + 1] === "*")) {
         return true;
       }
@@ -80,26 +66,24 @@
     return false;
   }
 
-  // ------------------------------------------------------------------ state
   const S = {
-    state: "loading",        // loading | idle | running | failed
-    sid: 0,                  // bumped on every run/cancel: invalidates async work
-    runSource: null,         // source text the current trace was produced from
-    total: 0,                // log entries in the trace
+    state: "loading",
+    sid: 0,
+    runSource: null,
+    total: 0,
     disabledKinds: new Set(),
     counts: {},
-    rows: [],                // the displayed page of the (filtered) trace
-    selected: -1,            // index of the selected log
-    selPos: -1,              // its position in the filtered trace
+    rows: [],
+    selected: -1,
+    selPos: -1,
     pendingDelta: 0,
     tab: "env",
-    memTarget: -1,           // memory cell to highlight
-    stepRange: null,         // source range of the selected entry
-    focusRange: null,        // range pinned by clicking a location link
+    memTarget: -1,
+    stepRange: null,
+    focusRange: null,
     diag: null, diagSource: null, diagId: 0,
   };
 
-  // -------------------------------------------------------------- worker RPC
   let worker = null, nextId = 1;
   const pending = new Map();
   let startedAt = 0, ticker = null;
@@ -121,10 +105,10 @@
   function report(e) {
     if (e && e.message === "cancelled") return;
     console.error(e);
-    setDiag((e && e.message) || String(e), null, src.value, "Errore interno: ");
+    const prefix = e && e.overflow ? "Errore di esecuzione: " : "Errore interno: ";
+    setDiag((e && e.message) || String(e), null, src.value, prefix);
   }
 
-  // Serial queue. A pending job of a given type is replaced by a newer one.
   const nav = (() => {
     let busy = false;
     const queue = new Map();
@@ -141,13 +125,13 @@
     return (type, job) => { queue.set(type, job); pump(); };
   })();
 
-  // ------------------------------------------------------------ status/state
   function setState(next, message) {
     S.state = next;
     runBtn.disabled = next !== "idle";
     formatBtn.disabled = next !== "idle";
     cancelBtn.disabled = next !== "running";
     maxLogsEl.disabled = next === "running";
+    maxDepthEl.disabled = next === "running";
     statusEl.textContent = message;
   }
 
@@ -169,7 +153,8 @@
         const p = pending.get(m.id);
         if (!p) return;
         pending.delete(m.id);
-        if (m.ok) p.resolve(m.result); else p.reject(new Error(m.error));
+        if (m.ok) p.resolve(m.result);
+        else p.reject(Object.assign(new Error(m.error), { overflow: !!m.overflow }));
       }
     };
     w.onerror = (e) => { if (w === worker) fail(e.message || "Il worker si è interrotto."); };
@@ -184,11 +169,9 @@
     setDiag(message, null, src.value);
   }
 
-  // ------------------------------------------------------------------ editor
   const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const LH = 21;
 
-  // Syntax layer: the program highlighted by Prism (plain text if unavailable).
   function renderSyntax() {
     const text = src.value + "\n";
     syntax.innerHTML = window.Prism && Prism.languages.mao
@@ -198,7 +181,6 @@
     syntax.scrollLeft = src.scrollLeft;
   }
 
-  // Marks layer: transparent text, only the background of the ranges shows.
   function renderMarks(ranges) {
     const full = src.value + "\n", len = full.length;
     const segs = ranges.filter(Boolean).map((r) => {
@@ -242,9 +224,6 @@
 
   const isStale = () => S.runSource !== null && src.value !== S.runSource;
 
-  // Everything derived from "what the source looked like when the trace/error
-  // was produced": once the text differs, highlights, links and error messages
-  // are stale and hidden.
   let diagKey = null;
   function refreshDecor() {
     const stale = isStale();
@@ -280,9 +259,10 @@
     if (loc) revealLine(loc.line);
   }
 
-  function locDiag(err, source, prefix) { setDiag(err.message, err, source, prefix); }
+  function locDiag(err, source, prefix) {
+    setDiag(err.message, err.line ? err : null, source, prefix);
+  }
 
-  // Error links: put the caret at the start (or point) of the location.
   function moveCursor(loc) {
     src.focus();
     src.setSelectionRange(loc.start, loc.start);
@@ -290,13 +270,11 @@
     updateCursorPos();
   }
 
-  // Replace [start, end) with `text` and select [selStart, selEnd]. Goes
-  // through execCommand when possible so that undo (Ctrl+Z) keeps working.
   function editText(start, end, text, selStart, selEnd) {
     src.focus();
     src.setSelectionRange(start, end);
     let ok = false;
-    try { ok = document.execCommand("insertText", false, text); } catch (_) { /* fall through */ }
+    try { ok = document.execCommand("insertText", false, text); } catch (_) {  }
     if (!ok) {
       src.setRangeText(text, start, end, "end");
       src.dispatchEvent(new Event("input"));
@@ -311,8 +289,6 @@
     src.scrollTop = 0;
   }
 
-  // Tab / Shift+Tab: indent / outdent the selected lines (or insert spaces up
-  // to the next tab stop when there is no selection).
   function indentSelection(outdent) {
     const text = src.value;
     let start = src.selectionStart, end = src.selectionEnd;
@@ -345,7 +321,6 @@
       Math.max(lineStart, start + firstDelta), Math.max(lineStart, end + total));
   }
 
-  // Enter keeps the indentation of the current line (one level deeper after "{").
   function newlineWithIndent() {
     const text = src.value, start = src.selectionStart, end = src.selectionEnd;
     const line = text.slice(text.lastIndexOf("\n", start - 1) + 1, start);
@@ -362,7 +337,7 @@
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
     if (e.key === "Escape") { escapeArmed = true; return; }
     if (e.key === "Tab" && plain) {
-      if (escapeArmed) { escapeArmed = false; return; } // Esc, Tab: leave the editor
+      if (escapeArmed) { escapeArmed = false; return; }
       e.preventDefault();
       indentSelection(e.shiftKey);
       return;
@@ -383,7 +358,7 @@
     updateCursorPos();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      try { localStorage.setItem(STORAGE_KEY, src.value); } catch (_) { /* ignore */ }
+      try { localStorage.setItem(STORAGE_KEY, src.value); } catch (_) {  }
     }, 400);
   });
   src.addEventListener("scroll", () => {
@@ -392,8 +367,26 @@
   for (const ev of ["keyup", "click", "focus"]) src.addEventListener(ev, updateCursorPos);
   document.addEventListener("selectionchange", () => { if (document.activeElement === src) updateCursorPos(); });
 
-  // --------------------------------------------------------------- run/format
-  const maxLogs = () => Math.max(0, Math.floor(Number(maxLogsEl.value) || 0));
+  // OCaml ints are 31-bit in WASM, so larger limits would overflow
+  const MAX_LIMIT = 1e9;
+
+  // an empty or invalid limit falls back to the default, only 0 means no limit
+  function readLimit(el) {
+    const n = Math.floor(Number(el.value));
+    const value = el.value.trim() !== "" && n >= 0 ? Math.min(n, MAX_LIMIT) : Number(el.defaultValue);
+    el.value = String(value);
+    return value;
+  }
+  for (const el of [maxLogsEl, maxDepthEl]) el.addEventListener("change", () => readLimit(el));
+
+  function clearInspector(text) {
+    for (const [body, empty, pager] of [["envBody", "envEmpty", envPager], ["memBody", "memEmpty", memPager]]) {
+      $(body).replaceChildren();
+      pager.update(0, 0);
+      $(empty).textContent = text || "";
+      $(empty).hidden = !text;
+    }
+  }
 
   function clearTrace() {
     S.runSource = null; S.total = 0; S.rows = [];
@@ -404,11 +397,8 @@
     $("q").value = ""; $("envq").value = ""; $("memq").value = "";
     $("chips").replaceChildren();
     $("logs").replaceChildren();
-    $("envBody").replaceChildren();
-    $("memBody").replaceChildren();
-    $("envEmpty").hidden = true;
-    $("memEmpty").hidden = true;
-    for (const p of [logsPager, envPager, memPager]) p.update(0, 0);
+    clearInspector();
+    logsPager.update(0, 0);
     showEmpty("Esegui un programma per vedere la traccia.");
     renderPos(); refreshDecor();
   }
@@ -424,7 +414,7 @@
     ticker = setInterval(() => { statusEl.textContent = `Esecuzione… ${elapsed()} s`; }, 100);
     let res;
     try {
-      res = await rpc("run", source, maxLogs());
+      res = await rpc("run", source, readLimit(maxLogsEl), readLimit(maxDepthEl));
     } catch (e) {
       stopTicker();
       if (sid === S.sid) { setState("idle", "Pronto"); report(e); }
@@ -432,19 +422,25 @@
     }
     stopTicker();
     if (sid !== S.sid) return;
+    if (!res.executed) {
+      setState("idle", "Programma non eseguito");
+      showEmpty("Il programma non è stato eseguito: correggi l'errore e riprova.");
+      locDiag(res.error, source);
+      return;
+    }
     S.runSource = source;
     S.total = res.total;
     S.counts = res.kinds;
-    setState("idle", `${fmtN(res.total)} log in ${elapsed()} s` +
+    setState("idle", `${fmtN(res.total)} ${res.total === 1 ? "passo" : "passi"} in ${elapsed()} s` +
       (res.maxDepth ? `, profondità massima delle chiamate ${res.maxDepth}` : "") +
       (res.error ? " (interrotta da un errore)" : ""));
     if (res.error) locDiag(res.error, source);
     buildChips();
     if (res.total === 0) {
-      showEmpty("L'esecuzione non ha prodotto log.");
+      showEmpty("L'esecuzione non ha prodotto nessuna traccia.");
       refreshDecor();
     } else {
-      nav("filter", () => applyFilter(true)); // selects the last entry: the final state
+      nav("filter", () => applyFilter(true));
     }
   }
 
@@ -453,7 +449,7 @@
     const source = src.value;
     let r;
     try { r = await rpc("format", source); } catch (e) { report(e); return; }
-    if (src.value !== source) return; // edited while formatting
+    if (src.value !== source) return;
     if (r.ok) {
       if (r.output !== source && hasComments(source) &&
           !window.confirm("Il formattatore non conserva i commenti: verranno rimossi (puoi annullare con Ctrl+Z). Continuare?")) {
@@ -465,7 +461,9 @@
       statusEl.textContent = r.output === source ? "Già formattato" : "Formattato";
       refreshDecor();
     } else {
-      locDiag(r.error, source, "Impossibile formattare: ");
+      statusEl.textContent = "Formattazione non riuscita";
+      const message = r.error.message.charAt(0).toLowerCase() + r.error.message.slice(1);
+      locDiag({ ...r.error, message }, source, "Impossibile formattare: ");
     }
   }
 
@@ -481,9 +479,8 @@
     setDiag("Esecuzione annullata.", null, src.value);
   }
 
-  // ---------------------------------------------------------------- examples
   const menu = $("examplesMenu"), exBtn = $("examples");
-  let examples = null;
+  let examples = null, exampleText = null;
 
   function closeMenu() {
     menu.hidden = true;
@@ -516,14 +513,21 @@
   }
 
   async function loadExample(name) {
+    const label = name.replace(/\.mao$/, "");
+    if (src.value.trim() && src.value !== exampleText &&
+        !window.confirm(`Il programma nell'editor verrà sostituito dall'esempio «${label}» (puoi annullare con Ctrl+Z). Continuare?`)) {
+      statusEl.textContent = "Caricamento dell'esempio annullato";
+      return;
+    }
     try {
       const r = await fetch(SAMPLES_DIR + encodeURIComponent(name));
       if (!r.ok) throw new Error(r.status);
-      const text = await r.text();
+      const text = (await r.text()).replace(/\r\n/g, "\n");
       S.diag = null;
-      replaceText(text.replace(/\r\n/g, "\n"));
+      replaceText(text);
+      exampleText = src.value;
       refreshDecor();
-      statusEl.textContent = `Esempio caricato: ${name.replace(/\.mao$/, "")}`;
+      statusEl.textContent = `Esempio caricato: ${label}`;
     } catch (_) {
       setDiag(`Impossibile caricare l'esempio «${name}».`, null, src.value);
     }
@@ -541,10 +545,6 @@
     }
   });
 
-  // ------------------------------------------------------------------- pager
-  // Pagination bar of a table: « ‹ pagina [n] di N › » and rows per page.
-  // `onPage(offset)` must load the page starting at `offset` and then call
-  // `update(offset, total)` with what the worker returned.
   function makePager(id, sizes, size, { onPage, onSize }) {
     const button = (text, title) =>
       h("button", { type: "button", class: "secondary small", title }, text);
@@ -597,7 +597,6 @@
     onSize: () => nav("inspector", () => loadMem(memPager.offset)),
   });
 
-  // Like scrollIntoView, but only scrolls the given box (never the page).
   function keepVisible(box, el) {
     const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
     const th = box.querySelector("thead");
@@ -606,7 +605,6 @@
     else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom;
   }
 
-  // -------------------------------------------------------------------- trace
   function showEmpty(text) {
     $("logsEmpty").textContent = text;
     $("logsEmpty").hidden = false;
@@ -628,8 +626,6 @@
     }
   }
 
-  // Sends the filter to the worker, then selects the last entry (first run)
-  // or the visible entry closest to the current selection.
   async function applyFilter(initial) {
     const sid = S.sid;
     if (!S.total) return;
@@ -658,7 +654,7 @@
     const frag = document.createDocumentFragment();
     S.rows.forEach((r, k) => {
       frag.append(h("tr", { "data-pos": logsPager.offset + k },
-        h("td", { class: "num" }, String(r.i)),
+        h("td", { class: "num" }, String(r.i + 1)),
         h("td", { style: `padding-left:${0.75 + r.depth * 1.1}rem` },
           h("span", { class: `badge k-${r.kind}` }, r.name)),
         h("td", null, r.descr),
@@ -666,7 +662,7 @@
     });
     $("logs").replaceChildren(frag);
     if (S.rows.length) $("logsEmpty").hidden = true;
-    else showEmpty(S.total ? "Nessun log corrisponde alla ricerca." : "Esegui un programma per vedere la traccia.");
+    else showEmpty(S.total ? "Nessun passo corrisponde alla ricerca." : "Esegui un programma per vedere la traccia.");
     markSelected();
   }
 
@@ -682,19 +678,19 @@
 
   function renderPos() {
     const has = S.total > 0 && S.selPos >= 0;
-    $("pos").textContent = !S.total ? "" : S.selected >= 0 ? `#${fmtN(S.selected)} di ${fmtN(S.total - 1)}` : "";
+    $("pos").textContent = has ? `#${fmtN(S.selected + 1)} di ${fmtN(S.total)}` : "";
     $("first").disabled = $("prev").disabled = !has || S.selPos === 0;
     $("next").disabled = $("last").disabled = !has || S.selPos >= logsPager.total - 1;
   }
 
-  // Selects the entry at position `pos` of the filtered trace, loading its
-  // page when needed. With an empty view the selection is kept unchanged.
   async function selectPos(pos, opts = {}) {
     const sid = S.sid, size = logsPager.size;
     if (!logsPager.total) {
-      S.selPos = -1;
+      S.selPos = -1; S.stepRange = null; S.focusRange = null;
       if (opts.reload) await loadLogs(0);
       renderPos();
+      clearInspector(S.total ? "Nessun passo selezionato." : "");
+      refreshDecor();
       return;
     }
     pos = clamp(pos, 0, logsPager.total - 1);
@@ -708,14 +704,12 @@
     markSelected();
     renderPos();
     S.stepRange = { start: row.start, end: row.end };
-    // Clicking a location link pins (and flashes) the range of the entry.
     S.focusRange = opts.flash ? { start: row.start, end: row.end } : null;
     refreshDecor();
     if (!isStale()) revealLine(row.line);
     await refreshInspector();
   }
 
-  // Step in the filtered trace; deltas accumulate while the worker is busy.
   function stepView(delta) {
     if (!S.total) return;
     S.pendingDelta += delta;
@@ -727,9 +721,7 @@
   }
 
   const select = (pos, opts) => nav("select", () => selectPos(pos, opts));
-  const toPage = (page) => logsPager.go(page);
 
-  // --------------------------------------------------------------- inspector
   function setTab(name) {
     S.tab = name;
     for (const t of ["env", "mem"]) {
@@ -741,7 +733,7 @@
   }
 
   async function refreshInspector() {
-    if (S.selected < 0) return;
+    if (S.selPos < 0) return;
     if (S.tab === "env") await loadEnv(envPager.offset); else await loadMem(memPager.offset);
   }
 
@@ -756,7 +748,7 @@
 
   async function loadEnv(offset) {
     const sid = S.sid;
-    if (S.selected < 0) return;
+    if (S.selPos < 0) return;
     const q = $("envq").value;
     const r = await rpc("env", S.selected, q, offset, envPager.size);
     if (sid !== S.sid) return;
@@ -777,7 +769,7 @@
 
   async function loadMem(offset) {
     const sid = S.sid;
-    if (S.selected < 0) return;
+    if (S.selPos < 0) return;
     const q = $("memq").value;
     const r = await rpc("memory", S.selected, q, offset, memPager.size);
     if (sid !== S.sid) return;
@@ -796,7 +788,6 @@
     if (target) keepVisible(target.closest(".scroll"), target);
   }
 
-  // Shows (and highlights) the memory cell at `addr`.
   function showMem(addr) {
     S.memTarget = addr;
     $("memq").value = "";
@@ -804,7 +795,6 @@
     if (S.tab !== "mem") setTab("mem"); else nav("inspector", refreshInspector);
   }
 
-  // --------------------------------------------------------------- info panel
   const info = $("info");
   let infoLoaded = false;
 
@@ -821,21 +811,19 @@
     }
   }
 
-  // ------------------------------------------------------------------ wiring
   runBtn.addEventListener("click", run);
   cancelBtn.addEventListener("click", cancel);
   formatBtn.addEventListener("click", format);
 
   $("infoBtn").addEventListener("click", openInfo);
   $("infoClose").addEventListener("click", () => info.close());
-  info.addEventListener("click", (e) => { if (e.target === info) info.close(); }); // backdrop
+  info.addEventListener("click", (e) => { if (e.target === info) info.close(); });
 
   $("first").addEventListener("click", () => select(0));
   $("last").addEventListener("click", () => select(logsPager.total - 1));
   $("prev").addEventListener("click", () => stepView(-1));
   $("next").addEventListener("click", () => stepView(1));
 
-  // Search boxes: wait for a pause in typing before asking the worker.
   function debounced(f) {
     let timer = null;
     return () => { clearTimeout(timer); timer = setTimeout(f, 250); };
@@ -847,15 +835,12 @@
     nav("inspector", () => loadMem(0));
   }));
 
-  // A row click selects the entry; a click on its location link also pins and
-  // flashes the entry's source range in the editor.
   $("logs").addEventListener("click", (e) => {
     const tr = e.target.closest("tr");
     if (!tr) return;
     select(Number(tr.dataset.pos), { flash: !!e.target.closest("a.loc") && !isStale() });
   });
 
-  // Keyboard navigation while the trace has focus (click a row first).
   $("trace").addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest("input, select, textarea")) return;
     if (!S.total) return;
@@ -863,8 +848,8 @@
     if (step) stepView(step);
     else if (e.key === "Home") select(0);
     else if (e.key === "End") select(logsPager.total - 1);
-    else if (e.key === "PageDown") toPage(logsPager.page() + 1);
-    else if (e.key === "PageUp") toPage(logsPager.page() - 1);
+    else if (e.key === "PageDown") stepView(logsPager.size);
+    else if (e.key === "PageUp") stepView(-logsPager.size);
     else return;
     e.preventDefault();
   });
@@ -881,17 +866,15 @@
     if (a) showMem(Number(a.dataset.addr));
   });
 
-  // -------------------------------------------------------------------- init
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) src.value = saved;
-  } catch (_) { /* storage unavailable */ }
+  } catch (_) {  }
   renderSyntax();
   renderGutter();
   updateCursorPos();
   clearTrace();
 
-  // The wasm is compiled with the WasmGC + exception-handling proposals.
   const hasWasmGC = WebAssembly.validate(
     new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 95, 1, 120, 0]));
   if (hasWasmGC) {

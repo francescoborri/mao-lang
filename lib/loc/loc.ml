@@ -1,11 +1,10 @@
-open Fmt
-
 type pos = { line : int; col : int; offset : int }
 type loc = { start_pos : pos; end_pos : pos }
 type 'a t = { it : 'a; at : loc }
 
 let dummy_pos = { line = 0; col = 0; offset = 0 }
 let dummy_loc = { start_pos = dummy_pos; end_pos = dummy_pos }
+let is_dummy loc = loc = dummy_loc
 let get_item { it; _ } = it
 let get_loc { at; _ } = at
 let map_item f { it; at } = { it = f it; at }
@@ -31,11 +30,15 @@ let with_positions ~start_pos ~end_pos item =
       }
 
 let pp_loc fmt { start_pos } =
-  Fmt.pf fmt "line %d, column %d" start_pos.line start_pos.col
+  Fmt.pf fmt "riga %d, colonna %d" start_pos.line start_pos.col
 
 let pp_end_loc fmt { end_pos } =
-  Fmt.pf fmt "line %d, column %d" end_pos.line end_pos.col
+  Fmt.pf fmt "riga %d, colonna %d" end_pos.line end_pos.col
 
 let pp_loc_full fmt loc = Fmt.pf fmt "%a - %a" pp_loc loc pp_end_loc loc
-let pp pp fmt { it; at } = Fmt.pf fmt "%a at %a" pp it pp_loc at
-let pp_full pp fmt { it; at } = Fmt.pf fmt "%a at %a" pp it pp_loc_full at
+
+let pp pp fmt { it; at } =
+  if is_dummy at then pp fmt it else Fmt.pf fmt "%a (%a)" pp it pp_loc at
+
+let pp_full pp fmt { it; at } =
+  if is_dummy at then pp fmt it else Fmt.pf fmt "%a (%a)" pp it pp_loc_full at

@@ -1,0 +1,141 @@
+# Hints for the most common syntax errors, compiled by `menhir --compile-errors`.
+# Each sentence identifies one state of the automaton, and the message after it
+# is shown for every token rejected in that state, so it must not depend on the
+# token: maoLang.ml prepends the rejected token itself. Error states not listed
+# here only report the rejected token.
+# Find the state of a sentence with:
+#   echo 'program: IDENT DECLARE' | menhir --interpret-error maoParser.mly
+
+# a program that is empty or starts with something that is not a command
+program: EOF
+
+Qui ci si aspetta un comando: una dichiarazione, un assegnamento, un if, un while, un blocco, una procedura o una funzione
+
+# a stray token after the last command, typically an extra '}'
+program: SKIP SEMICOLON RBRACE
+
+Qui ci si aspetta un altro comando o la fine del programma (forse c'è una '}' di troppo?)
+
+# x = 1;
+program: IDENT DECLARE
+
+Un comando che inizia con un nome è un assegnamento (x := e;), una scrittura in un array (a[i] := e;) oppure un'invocazione di procedura (p(...);)
+
+# int x = 1 int y = 2;
+program: INT_TYPE IDENT DECLARE INT INT_TYPE
+
+Forse manca ';' alla fine del comando, oppure un operatore o una ',' tra due espressioni
+
+# a[0] := 1 x := 2;
+program: IDENT LBRACKET INT RBRACKET ASSIGN INT IDENT
+
+Forse manca ';' alla fine dell'assegnamento
+
+# skip
+program: SKIP IDENT
+
+Dopo 'skip' ci vuole ';'
+
+# int x = ;   x := ;   while () ...   if () ...
+program: INT_TYPE IDENT DECLARE SEMICOLON
+program: IDENT ASSIGN SEMICOLON
+program: WHILE LPAREN RPAREN
+program: IF LPAREN RPAREN
+
+Qui ci si aspetta un'espressione
+
+# int a[10];
+program: INT_TYPE IDENT LBRACKET
+
+Dopo il nome ci si aspetta '=', ',' o ';', oppure '(' per una funzione; il tipo di un array si scrive con le parentesi quadre, ad esempio int[] a = new int[10];
+
+# if x > 0 { ... }
+program: IF IDENT
+
+La condizione dell'if va scritta tra parentesi tonde: if (condizione) { ... }
+
+# while x > 0 { ... }
+program: WHILE IDENT
+
+La condizione del while va scritta tra parentesi tonde: while (condizione) { ... }
+
+# if (i < n { ...   while (i < n { ...
+program: IF LPAREN IDENT LT IDENT LBRACE
+program: WHILE LPAREN IDENT LT IDENT LBRACE
+
+Forse manca ')' alla fine della condizione
+
+# if (x) skip;
+program: IF LPAREN IDENT RPAREN SKIP
+
+Il corpo dell'if va racchiuso tra graffe { ... }, anche se contiene un solo comando
+
+# while (x) skip;
+program: WHILE LPAREN IDENT RPAREN SKIP
+
+Il corpo del while va racchiuso tra graffe { ... }, anche se contiene un solo comando
+
+# if (x) { ... } else if (y) { ... }
+program: IF LPAREN IDENT RPAREN LBRACE SKIP SEMICOLON RBRACE ELSE IF
+
+Dopo 'else' ci vuole un blocco tra graffe: Mao non ha 'else if', quindi scrivi else { if (...) { ... } }
+
+# empty blocks: { }   if (x) { }   else { }   while (x) { }   p() { }   p(int x) { }
+program: LBRACE RBRACE
+program: IF LPAREN IDENT RPAREN LBRACE RBRACE
+program: IF LPAREN IDENT RPAREN LBRACE SKIP SEMICOLON RBRACE ELSE LBRACE RBRACE
+program: WHILE LPAREN IDENT RPAREN LBRACE RBRACE
+program: IDENT LPAREN RPAREN LBRACE RBRACE
+program: IDENT LPAREN INT_TYPE IDENT RPAREN LBRACE RBRACE
+
+Qui ci si aspetta un comando: un blocco non può essere vuoto, se non deve fare nulla scrivi 'skip;'
+
+# a block left open at the end of the program
+program: LBRACE SKIP SEMICOLON EOF
+program: IF LPAREN IDENT RPAREN LBRACE SKIP SEMICOLON EOF
+program: IF LPAREN IDENT RPAREN LBRACE SKIP SEMICOLON RBRACE ELSE LBRACE SKIP SEMICOLON EOF
+program: WHILE LPAREN IDENT RPAREN LBRACE SKIP SEMICOLON EOF
+program: IDENT LPAREN RPAREN LBRACE SKIP SEMICOLON EOF
+program: IDENT LPAREN INT_TYPE IDENT RPAREN LBRACE SKIP SEMICOLON EOF
+
+Qui ci si aspetta un altro comando oppure '}' per chiudere il blocco
+
+# int x = { };
+program: INT_TYPE IDENT DECLARE LBRACE RBRACE
+
+Un blocco usato come espressione contiene dei comandi e termina con 'return', ad esempio { int y = 2; return y + 1; }
+
+# int x = { skip; };
+program: INT_TYPE IDENT DECLARE LBRACE SKIP SEMICOLON RBRACE
+
+Un blocco usato come espressione deve terminare con 'return espressione;' prima di '}'
+
+# int x = { return y };
+program: INT_TYPE IDENT DECLARE LBRACE RETURN IDENT RBRACE
+
+Dopo l'espressione del 'return' ci vuole ';'
+
+# int y = (x + 1;
+program: INT_TYPE IDENT DECLARE LPAREN IDENT INT_TYPE
+
+Forse manca ')'
+
+# p() q();
+program: IDENT LPAREN RPAREN IDENT
+
+Dopo '()' ci vuole ';' per invocare la procedura, oppure '{' per dichiararla
+
+# p(x) { ... }
+program: IDENT LPAREN IDENT RPAREN LBRACE
+
+Dopo un'invocazione di procedura ci vuole ';'; per dichiarare una procedura scrivi il tipo di ogni parametro, ad esempio p(int x) { ... }
+
+# p(int x);
+program: IDENT LPAREN INT_TYPE IDENT RPAREN SEMICOLON
+
+Dopo i parametri di una procedura ci vuole il suo corpo tra graffe, ad esempio p(int x) { ... }
+
+# int f(int x);
+program: INT_TYPE IDENT LPAREN INT_TYPE IDENT RPAREN SEMICOLON
+
+Dopo i parametri di una funzione ci vuole il suo corpo, cioè un'espressione, ad esempio int f(int x) x + 1

@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Playground Mao (v1.1)</title>
+  <title>Playground Mao</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -121,8 +121,6 @@
       min-width: 0;
     }
 
-    /* Large screens: an app-like layout that fits the viewport (no page
-       scrollbar). Editor on the left; trace above inspector on the right. */
     @media (min-width: 1000px) and (min-height: 620px) {
 
       html,
@@ -208,7 +206,6 @@
       overflow: hidden;
     }
 
-    /* ---------- editor ---------- */
     .editor {
       display: flex;
       height: 21rem;
@@ -236,8 +233,6 @@
       min-width: 0;
     }
 
-    /* Three stacked layers with identical metrics: range marks (bottom),
-       Prism-highlighted text, and the real <textarea> (top, transparent text). */
     .code .layer,
     .code textarea {
       position: absolute;
@@ -350,8 +345,11 @@
       gap: 1rem;
     }
 
-    .max-logs {
-      margin-left: auto;
+    .limits {
+      justify-content: flex-end;
+    }
+
+    .limits label {
       font-weight: 400;
     }
 
@@ -478,7 +476,6 @@
       cursor: pointer;
     }
 
-    /* examples menu */
     .menu {
       position: relative;
     }
@@ -526,7 +523,6 @@
       font-size: .9rem;
     }
 
-    /* ---------- tables ---------- */
     .scroll {
       overflow: auto;
       flex: 1;
@@ -683,7 +679,6 @@
       text-decoration: none;
     }
 
-    /* ---------- trace & inspector ---------- */
     .card-head {
       padding: .6rem .8rem;
       border-bottom: 1px solid var(--line);
@@ -768,7 +763,6 @@
       display: none;
     }
 
-    /* ---------- info panel & footer ---------- */
     dialog.info {
       max-width: min(42rem, calc(100vw - 2rem));
       max-height: calc(100vh - 4rem);
@@ -856,7 +850,7 @@
   <main>
     <header class="top">
       <h1>Playground Mao</h1>
-      <span class="version">v1.1</span>
+      <span class="version">v1.2</span>
       <button id="infoBtn" class="secondary info-btn" type="button" aria-haspopup="dialog">
         <span class="info-icon" aria-hidden="true">i</span>Aiuto
       </button>
@@ -882,8 +876,13 @@
               aria-controls="examplesMenu">Esempi ▾</button>
             <ul id="examplesMenu" role="menu" hidden></ul>
           </div>
-          <label class="max-logs muted" title="Numero massimo di passi (0 = illimitato)">
+        </div>
+        <div class="bar limits">
+          <label class="muted" title="Numero massimo di passi (0 = illimitato)">
             Limite passi <input id="maxLogs" class="narrow" type="number" min="0" step="10000" value="300000">
+          </label>
+          <label class="muted" title="Numero massimo di chiamate annidate (0 = illimitato)">
+            Limite ricorsione <input id="maxDepth" class="narrow" type="number" min="0" step="100" value="1500">
           </label>
         </div>
         <div class="editor-foot">
@@ -980,7 +979,6 @@
     </footer>
   </main>
 
-  <!-- The content of this panel lives in info.html -->
   <dialog id="info" class="info" aria-label="Come si usa">
     <div class="info-inner">
       <button id="infoClose" class="secondary info-close" type="button" aria-label="Chiudi">×</button>

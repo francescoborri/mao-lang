@@ -12,4 +12,4 @@ int conta_maggiori(int[] a, int k) {
     }
     return aux_conta_maggiori(a, k, 0);
 }
-int result = conta_maggiori([3, 2, 5, 1, 6, 4], 3);
+int r = conta_maggiori([3, 2, 5, 1, 6, 4], 3);
