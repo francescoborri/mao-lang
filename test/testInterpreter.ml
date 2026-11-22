@@ -110,8 +110,8 @@ let tests =
           "events"
           [
             "dichiarazione di procedura";
-            "inizio invocazione #0";
-            "fine invocazione #0";
+            "inizio invocazione #1";
+            "fine invocazione #1";
           ]
           (events "p() { skip; } p();"));
     test "recursion (11.3)" (fun () ->
@@ -125,14 +125,28 @@ let tests =
           "events"
           [
             "dichiarazione di funzione";
-            "inizio chiamata #0";
+            "inizio chiamata #1";
             "dichiarazione";
-            "fine chiamata #0";
+            "fine chiamata #1";
             "dichiarazione";
             "if";
             "assegnamento";
           ]
           (events "int f(int n) n int x = f(1); if (x > 0) { x := 2; }"));
+    test "steps and calls are numbered from 1" (fun () ->
+        let src = "int f(int n) n int x = f(f(1));" in
+        Alcotest.(check (list string))
+          src
+          [ "inizio chiamata #1"; "inizio chiamata #2" ]
+          (events src |> List.filter (String.starts_with ~prefix:"inizio"));
+        let table =
+          Fmt.str "%a" DataStructure_pp.pp_logs (run_traced src |> snd)
+        in
+        let steps =
+          String.split_on_char '\n' table
+          |> List.filter_map (fun row -> Scanf.sscanf_opt row "| %d " Fun.id)
+        in
+        Alcotest.(check (list int)) "steps" (List.init 8 succ) steps);
     test "log limit" (fun () ->
         let res, logs =
           run_traced ~max_logs:5 "int n; while (true) { n := n + 1; }"

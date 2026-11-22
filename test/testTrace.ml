@@ -32,13 +32,13 @@ let stores = Trace.filter trace ~kinds:[ Trace.Kind.Store ] ~query:""
 let tests =
   [
     test "entries" (fun () ->
-        let Trace.Entry.{ descr } = find_entry "inizio chiamata #1" in
+        let Trace.Entry.{ descr } = find_entry "inizio chiamata #2" in
         Alcotest.(check int) "length" n (List.length (entries trace));
         Alcotest.(check string) "call description" "f(...)" descr;
         Alcotest.(check bool)
           "end of invocation" true
           (List.exists
-             (fun Trace.Entry.{ name } -> name = "fine invocazione #0")
+             (fun Trace.Entry.{ name } -> name = "fine invocazione #1")
              (entries trace)));
     test "depth" (fun () ->
         let depth_of id =
@@ -48,9 +48,9 @@ let tests =
         Alcotest.(check int) "max depth" 3 (Trace.max_depth trace);
         Alcotest.(check int)
           "begin and end of a call"
-          (depth_of "inizio chiamata #2")
-          (depth_of "fine chiamata #2");
-        Alcotest.(check int) "top level" 0 (depth_of "inizio invocazione #0"));
+          (depth_of "inizio chiamata #3")
+          (depth_of "fine chiamata #3");
+        Alcotest.(check int) "top level" 0 (depth_of "inizio invocazione #1"));
     test "pages" (fun () ->
         let Trace.Page.{ items; offset; total } =
           Trace.entries trace ~offset:2 ~limit:3

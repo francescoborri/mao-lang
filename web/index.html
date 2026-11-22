@@ -16,12 +16,13 @@
       --grid: #efece6;
       --head: #faf9f6;
       --zebra: #fcfbf9;
-      --hover: #f6efe8;
+      --hover: #f2f0eb;
       --accent: #b5470c;
       --accent-fg: #ffffff;
       --err: #b3261e;
       --err-bg: #fdecea;
-      --sel: #fbe6d6;
+      --sel: #fadcc6;
+      --sel-line: #ecb48c;
       --hl: rgba(181, 71, 12, .22);
       --chg: #fff5cc;
       --chg-mark: #e0b100;
@@ -44,12 +45,13 @@
         --grid: #26262b;
         --head: #212126;
         --zebra: #202024;
-        --hover: #2b2520;
+        --hover: #28282d;
         --accent: #f08a4b;
         --accent-fg: #1a1208;
         --err: #ff8a80;
         --err-bg: #3a1f1d;
-        --sel: #3d2b1e;
+        --sel: #4a3020;
+        --sel-line: #7a4a2a;
         --hl: rgba(240, 138, 75, .30);
         --chg: #3b3517;
         --chg-mark: #d6b13a;
@@ -345,12 +347,40 @@
       gap: 1rem;
     }
 
-    .limits {
-      justify-content: flex-end;
+    .menu .popover {
+      position: absolute;
+      bottom: calc(100% + .3rem);
+      right: 0;
+      z-index: 5;
+      display: grid;
+      gap: .5rem;
+      padding: .6rem .75rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .2);
+    }
+
+    .menu .popover[hidden] {
+      display: none;
+    }
+
+    /* also when the toolbar wraps, so the popover always opens leftwards */
+    .menu.end {
+      margin-left: auto;
     }
 
     .limits label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
       font-weight: 400;
+      white-space: nowrap;
+    }
+
+    .limits input {
+      width: 7.5rem;
     }
 
     .bar {
@@ -371,6 +401,54 @@
     #status {
       color: var(--muted);
       font-size: .9rem;
+    }
+
+    .spinner,
+    #status.busy::before {
+      display: inline-block;
+      width: .8em;
+      height: .8em;
+      margin-right: .5em;
+      vertical-align: -.05em;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+
+    #status.busy::before {
+      content: "";
+    }
+
+    #cursorPos {
+      white-space: nowrap;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(1turn);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .spinner,
+      #status.busy::before {
+        animation-duration: 2.4s;
+      }
+    }
+
+    .info-inner .note {
+      min-width: min(24rem, 70vw);
+      margin: .3rem 2.5rem .3rem 0;
+      color: var(--muted);
+    }
+
+    /* more specific than the .note rules, which set a muted colour */
+    #status.error,
+    .menu .note.error,
+    .info-inner .note.error {
+      color: var(--err);
     }
 
     button {
@@ -426,6 +504,21 @@
     input.search {
       flex: 1;
       min-width: 8rem;
+    }
+
+    .pos {
+      min-width: 7.5rem;
+      text-align: center;
+      font-size: .9rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .state-at {
+      color: var(--muted);
+      font-size: .85rem;
+      white-space: nowrap;
     }
 
     .info-btn {
@@ -565,28 +658,28 @@
       background: var(--hover);
     }
 
-    table.data tr.chg td {
+    table.data tbody tr.chg td {
       background: var(--chg);
     }
 
-    table.data tr.chg td:first-child {
+    table.data tbody tr.chg td:first-child {
       box-shadow: inset 3px 0 0 var(--chg-mark);
     }
 
-    table.data tr.target td {
+    table.data tbody tr.target td,
+    table.data tbody tr.sel td {
       background: var(--sel);
+      box-shadow: inset 0 1px 0 var(--sel-line), inset 0 -1px 0 var(--sel-line);
     }
 
-    table.data tr.target td:first-child {
-      box-shadow: inset 3px 0 0 var(--accent);
+    table.data tbody tr.target td:first-child,
+    table.data tbody tr.sel td:first-child {
+      box-shadow: inset 4px 0 0 var(--accent), inset 0 1px 0 var(--sel-line), inset 0 -1px 0 var(--sel-line);
     }
 
-    table.data tr.sel td {
-      background: var(--sel);
-    }
-
-    table.data tr.sel td:first-child {
-      box-shadow: inset 3px 0 0 var(--accent);
+    table.data tbody tr.sel .num {
+      color: var(--accent);
+      font-weight: 700;
     }
 
     table.data .num {
@@ -876,14 +969,18 @@
               aria-controls="examplesMenu">Esempi ▾</button>
             <ul id="examplesMenu" role="menu" hidden></ul>
           </div>
-        </div>
-        <div class="bar limits">
-          <label class="muted" title="Numero massimo di passi (0 = illimitato)">
-            Limite passi <input id="maxLogs" class="narrow" type="number" min="0" step="10000" value="300000">
-          </label>
-          <label class="muted" title="Numero massimo di chiamate annidate (0 = illimitato)">
-            Limite ricorsione <input id="maxDepth" class="narrow" type="number" min="0" step="100" value="1500">
-          </label>
+          <div class="menu end">
+            <button id="limitsBtn" class="secondary" aria-haspopup="true" aria-expanded="false"
+              aria-controls="limitsPanel">Limiti ▾</button>
+            <div id="limitsPanel" class="popover limits" role="group" aria-label="Limiti dell'esecuzione" hidden>
+              <label title="Numero massimo di passi (0 = illimitato)">
+                Limite passi <input id="maxLogs" type="number" min="0" step="10000" value="300000">
+              </label>
+              <label title="Numero massimo di chiamate annidate (0 = illimitato)">
+                Limite ricorsione <input id="maxDepth" type="number" min="0" step="100" value="1500">
+              </label>
+            </div>
+          </div>
         </div>
         <div class="editor-foot">
           <span id="status">Caricamento dell'interprete…</span>
@@ -898,11 +995,11 @@
             <div class="bar tight">
               <button class="secondary small" id="first" title="Primo (Home)">⏮</button>
               <button class="secondary small" id="prev" title="Precedente (↑ / k)">◀</button>
+              <span id="pos" class="pos" aria-live="polite"></span>
               <button class="secondary small" id="next" title="Successivo (↓ / j)">▶</button>
               <button class="secondary small" id="last" title="Ultimo (Fine)">⏭</button>
               <input id="q" class="search" type="search" placeholder="Cerca nella traccia…"
                 aria-label="Cerca nella traccia">
-              <span id="pos" class="mono muted"></span>
             </div>
             <div class="chips" id="chips"></div>
           </div>
@@ -927,6 +1024,7 @@
           <div class="tabs" role="tablist">
             <button class="tab" role="tab" id="tab-env" aria-selected="true" aria-controls="panel-env">Ambiente</button>
             <button class="tab" role="tab" id="tab-mem" aria-selected="false" aria-controls="panel-mem">Memoria</button>
+            <span id="stateAt" class="state-at"></span>
             <input id="envq" class="search" type="search" placeholder="Cerca variabili…"
               aria-label="Cerca nell'ambiente">
             <input id="memq" class="search" type="search" placeholder="Cerca valori o variabili…"

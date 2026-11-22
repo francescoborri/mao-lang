@@ -38,7 +38,7 @@ let pp_table ?(with_index = false) named_pps fmt logs =
       List.mapi
         (fun i log ->
           let cells = List.map (fun pp -> Fmt.to_to_string pp log) pps in
-          if with_index then string_of_int i :: cells else cells)
+          if with_index then string_of_int (i + 1) :: cells else cells)
         logs
     in
     let columns =

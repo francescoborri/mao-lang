@@ -2,19 +2,21 @@
 
 let failed = false;
 
-function fatal(message) {
+// the message is for the student, the detail (often in English) for the console
+function fatal(message, detail) {
   if (failed) return;
   failed = true;
-  self.postMessage({ type: "fatal", message });
+  self.postMessage({ type: "fatal", message, detail: detail === undefined ? undefined : String(detail) });
 }
 
-self.addEventListener("unhandledrejection", (e) =>
-  fatal("Impossibile inizializzare l'interprete: " + e.reason));
+const LOAD_FAILED = "Impossibile caricare l'interprete: controlla la connessione e riprova.";
+
+self.addEventListener("unhandledrejection", (e) => fatal(LOAD_FAILED, e.reason));
 
 try {
   importScripts("main.bc.wasm.js");
 } catch (err) {
-  fatal("Impossibile caricare main.bc.wasm.js: " + err);
+  fatal(LOAD_FAILED, err);
 }
 
 const isStackOverflow = (err) =>
@@ -50,7 +52,7 @@ self.onmessage = (e) => {
   if (self.Mao && typeof self.Mao.run === "function") {
     self.postMessage({ type: "ready" });
   } else if (tries > 300) {
-    fatal("Timeout in attesa dell'avvio dell'interprete.");
+    fatal("L'interprete non si è avviato in tempo: riprova.");
   } else {
     setTimeout(() => waitForRuntime(tries + 1), 50);
   }

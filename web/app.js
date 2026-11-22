@@ -20,6 +20,7 @@
   const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
   const fmtN = (n) => n.toLocaleString("it-IT");
   const hex = (a) => "0x" + a.toString(16);
+  const NETWORK_HINT = "controlla la connessione e riprova.";
 
   function h(tag, attrs, ...kids) {
     const e = document.createElement(tag);
@@ -28,6 +29,21 @@
     }
     for (const c of kids) e.append(c);
     return e;
+  }
+
+  const spinner = () => h("span", { class: "spinner", "aria-hidden": "true" });
+
+  function retryButton(run, attrs) {
+    const b = h("button", { type: "button", class: "linklike", ...attrs }, "Riprova");
+    b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+    return b;
+  }
+
+  // kind is "busy" (with a spinner), "error" or undefined
+  function setStatus(text, kind, retry) {
+    statusEl.className = kind || "";
+    statusEl.replaceChildren(text);
+    if (retry) statusEl.append(" ", retryButton(retry));
   }
 
   if (window.Prism) {
@@ -132,7 +148,7 @@
     cancelBtn.disabled = next !== "running";
     maxLogsEl.disabled = next === "running";
     maxDepthEl.disabled = next === "running";
-    statusEl.textContent = message;
+    setStatus(message, { loading: "busy", running: "busy", failed: "error" }[next]);
   }
 
   const elapsed = () => ((performance.now() - startedAt) / 1000).toFixed(1).replace(".", ",");
@@ -148,7 +164,7 @@
       if (m.type === "ready") {
         setState("idle", "Pronto");
       } else if (m.type === "fatal") {
-        fail(m.message);
+        fail(m.message, m.detail);
       } else if (m.id !== undefined) {
         const p = pending.get(m.id);
         if (!p) return;
@@ -157,16 +173,21 @@
         else p.reject(Object.assign(new Error(m.error), { overflow: !!m.overflow }));
       }
     };
-    w.onerror = (e) => { if (w === worker) fail(e.message || "Il worker si è interrotto."); };
+    w.onerror = (e) => {
+      e.preventDefault();
+      if (w === worker) fail("Impossibile avviare l'interprete: " + NETWORK_HINT, e.message);
+    };
   }
 
-  function fail(message) {
+  // the technical detail, often in English, only goes to the console
+  function fail(message, detail) {
+    if (detail) console.error(detail);
     stopTicker();
     rejectAll("cancelled");
     if (worker) worker.terminate();
     worker = null;
-    setState("failed", "L'interprete non è disponibile.");
-    setDiag(message, null, src.value);
+    setState("failed", message);
+    setStatus(message, "error", () => startWorker());
   }
 
   const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -411,7 +432,7 @@
     clearTrace();
     startedAt = performance.now();
     setState("running", "Esecuzione… 0,0 s");
-    ticker = setInterval(() => { statusEl.textContent = `Esecuzione… ${elapsed()} s`; }, 100);
+    ticker = setInterval(() => setStatus(`Esecuzione… ${elapsed()} s`, "busy"), 100);
     let res;
     try {
       res = await rpc("run", source, readLimit(maxLogsEl), readLimit(maxDepthEl));
@@ -432,7 +453,7 @@
     S.total = res.total;
     S.counts = res.kinds;
     setState("idle", `${fmtN(res.total)} ${res.total === 1 ? "passo" : "passi"} in ${elapsed()} s` +
-      (res.maxDepth ? `, profondità massima delle chiamate ${res.maxDepth}` : "") +
+      (res.maxDepth ? `, con profondità massima delle chiamate uguale a ${res.maxDepth}` : "") +
       (res.error ? " (interrotta da un errore)" : ""));
     if (res.error) locDiag(res.error, source);
     buildChips();
@@ -453,15 +474,15 @@
     if (r.ok) {
       if (r.output !== source && hasComments(source) &&
           !window.confirm("Il formattatore non conserva i commenti: verranno rimossi (puoi annullare con Ctrl+Z). Continuare?")) {
-        statusEl.textContent = "Formattazione annullata";
+        setStatus("Formattazione annullata");
         return;
       }
       S.diag = null;
       if (r.output !== source) replaceText(r.output);
-      statusEl.textContent = r.output === source ? "Già formattato" : "Formattato";
+      setStatus(r.output === source ? "Già formattato" : "Formattato");
       refreshDecor();
     } else {
-      statusEl.textContent = "Formattazione non riuscita";
+      setStatus("Formattazione non riuscita");
       const message = r.error.message.charAt(0).toLowerCase() + r.error.message.slice(1);
       locDiag({ ...r.error, message }, source, "Impossibile formattare: ");
     }
@@ -487,19 +508,35 @@
     exBtn.setAttribute("aria-expanded", "false");
   }
 
+  async function fetchOk(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+    return r;
+  }
+
+  let examplesLoading = false;
+
   async function openMenu() {
     menu.hidden = false;
     exBtn.setAttribute("aria-expanded", "true");
     if (examples === null) {
-      menu.replaceChildren(h("li", { class: "note" }, "Caricamento…"));
+      if (examplesLoading) return;
+      examplesLoading = true;
+      menu.replaceChildren(h("li", { class: "note" }, spinner(), "Caricamento degli esempi…"));
       try {
-        const r = await fetch(SAMPLES_DIR + "index.json");
-        if (!r.ok) throw new Error(r.status);
-        examples = await r.json();
-      } catch (_) {
-        menu.replaceChildren(h("li", { class: "note" }, "Impossibile caricare gli esempi."));
+        examples = await (await fetchOk(SAMPLES_DIR + "index.json")).json();
+      } catch (e) {
+        console.error(e);
+        const retry = retryButton(openMenu, { role: "menuitem" });
+        menu.replaceChildren(
+          h("li", { class: "note error" }, "Impossibile caricare gli esempi: " + NETWORK_HINT),
+          h("li", { role: "none" }, retry));
+        if (!menu.hidden) retry.focus();
         return;
+      } finally {
+        examplesLoading = false;
       }
+      if (menu.hidden) return;
     }
     menu.replaceChildren();
     if (!examples.length) menu.append(h("li", { class: "note" }, "Nessun esempio disponibile."));
@@ -512,29 +549,57 @@
     if (first) first.focus();
   }
 
+  let exampleRequest = 0;
+
   async function loadExample(name) {
     const label = name.replace(/\.mao$/, "");
     if (src.value.trim() && src.value !== exampleText &&
         !window.confirm(`Il programma nell'editor verrà sostituito dall'esempio «${label}» (puoi annullare con Ctrl+Z). Continuare?`)) {
-      statusEl.textContent = "Caricamento dell'esempio annullato";
+      setStatus("Caricamento dell'esempio annullato");
       return;
     }
+    const request = ++exampleRequest, before = src.value;
+    setStatus(`Caricamento dell'esempio «${label}»…`, "busy");
+    let text;
     try {
-      const r = await fetch(SAMPLES_DIR + encodeURIComponent(name));
-      if (!r.ok) throw new Error(r.status);
-      const text = (await r.text()).replace(/\r\n/g, "\n");
-      S.diag = null;
-      replaceText(text);
-      exampleText = src.value;
-      refreshDecor();
-      statusEl.textContent = `Esempio caricato: ${label}`;
-    } catch (_) {
-      setDiag(`Impossibile caricare l'esempio «${name}».`, null, src.value);
+      text = (await (await fetchOk(SAMPLES_DIR + encodeURIComponent(name))).text()).replace(/\r\n/g, "\n");
+    } catch (e) {
+      console.error(e);
+      if (request === exampleRequest) {
+        setStatus(`Impossibile caricare l'esempio «${label}»: ${NETWORK_HINT}`, "error", () => loadExample(name));
+      }
+      return;
     }
+    if (request !== exampleRequest) return;
+    // the student may have kept typing while the example was downloading
+    if (src.value !== before) {
+      setStatus("Caricamento dell'esempio annullato: il programma è stato modificato");
+      return;
+    }
+    S.diag = null;
+    replaceText(text);
+    exampleText = src.value;
+    refreshDecor();
+    setStatus(`Esempio caricato: ${label}`);
+  }
+
+  const limitsBtn = $("limitsBtn"), limitsPanel = $("limitsPanel");
+
+  function toggleLimits(open) {
+    limitsPanel.hidden = !open;
+    limitsBtn.setAttribute("aria-expanded", String(open));
+    if (open) maxLogsEl.focus();
   }
 
   exBtn.addEventListener("click", () => { if (menu.hidden) openMenu(); else closeMenu(); });
-  document.addEventListener("click", (e) => { if (!e.target.closest(".menu")) closeMenu(); });
+  limitsBtn.addEventListener("click", () => toggleLimits(limitsPanel.hidden));
+  limitsPanel.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" || e.key === "Enter") { toggleLimits(false); limitsBtn.focus(); }
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#examples, #examplesMenu")) closeMenu();
+    if (!e.target.closest("#limitsBtn, #limitsPanel")) toggleLimits(false);
+  });
   menu.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { closeMenu(); exBtn.focus(); }
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -584,15 +649,15 @@
     return p;
   }
 
-  const logsPager = makePager("logsPager", [50, 100, 250, 500], 100, {
+  const logsPager = makePager("logsPager", [25, 50, 100, 250], 50, {
     onPage: (offset) => nav("page", () => loadLogs(offset)),
     onSize: () => nav("select", () => S.selPos >= 0 ? selectPos(S.selPos, { reload: true }) : loadLogs(0)),
   });
-  const envPager = makePager("envPager", [10, 25, 50, 100], 25, {
+  const envPager = makePager("envPager", [25, 50, 100, 250], 50, {
     onPage: (offset) => nav("inspector", () => loadEnv(offset)),
     onSize: () => nav("inspector", () => loadEnv(envPager.offset)),
   });
-  const memPager = makePager("memPager", [16, 32, 64, 128], 32, {
+  const memPager = makePager("memPager", [25, 50, 100, 250], 50, {
     onPage: (offset) => nav("inspector", () => loadMem(offset)),
     onSize: () => nav("inspector", () => loadMem(memPager.offset)),
   });
@@ -671,6 +736,7 @@
     for (const tr of $("logs").children) {
       const on = S.selPos >= 0 && Number(tr.dataset.pos) === S.selPos;
       tr.classList.toggle("sel", on);
+      if (on) tr.setAttribute("aria-current", "step"); else tr.removeAttribute("aria-current");
       if (on) found = tr;
     }
     if (found) keepVisible($("logsScroll"), found);
@@ -678,7 +744,8 @@
 
   function renderPos() {
     const has = S.total > 0 && S.selPos >= 0;
-    $("pos").textContent = has ? `#${fmtN(S.selected + 1)} di ${fmtN(S.total)}` : "";
+    $("pos").textContent = has ? `passo ${fmtN(S.selected + 1)} di ${fmtN(S.total)}` : "—";
+    $("stateAt").textContent = has ? `dopo il passo ${fmtN(S.selected + 1)}` : "";
     $("first").disabled = $("prev").disabled = !has || S.selPos === 0;
     $("next").disabled = $("last").disabled = !has || S.selPos >= logsPager.total - 1;
   }
@@ -795,20 +862,28 @@
     if (S.tab !== "mem") setTab("mem"); else nav("inspector", refreshInspector);
   }
 
-  const info = $("info");
-  let infoLoaded = false;
+  const info = $("info"), infoBody = $("infoBody");
+  let infoState = "empty";
 
-  async function openInfo() {
-    info.showModal();
-    if (infoLoaded) return;
+  async function loadInfo() {
+    infoState = "loading";
+    infoBody.replaceChildren(h("p", { class: "note" }, spinner(), "Caricamento della guida…"));
     try {
-      const r = await fetch(INFO_URL);
-      if (!r.ok) throw new Error(r.status);
-      $("infoBody").innerHTML = await r.text();
-      infoLoaded = true;
-    } catch (_) {
-      $("infoBody").textContent = "Impossibile caricare le informazioni.";
+      infoBody.innerHTML = await (await fetchOk(INFO_URL)).text();
+      infoState = "loaded";
+    } catch (e) {
+      console.error(e);
+      infoState = "empty";
+      const retry = retryButton(loadInfo);
+      infoBody.replaceChildren(h("p", { class: "note error" },
+        "Impossibile caricare la guida: " + NETWORK_HINT + " ", retry));
+      if (info.open) retry.focus();
     }
+  }
+
+  function openInfo() {
+    info.showModal();
+    if (infoState === "empty") loadInfo();
   }
 
   runBtn.addEventListener("click", run);

@@ -21,7 +21,10 @@ let tell x _ st =
   (Ok (), { st with logs = x :: st.logs; log_id = st.log_id + 1 })
 
 let get_log_id () _ st = (Ok st.log_id, st)
-let incr_call_id () _ st = (Ok st.call_id, { st with call_id = st.call_id + 1 })
+
+let incr_call_id () _ st =
+  let call_id = st.call_id + 1 in
+  (Ok call_id, { st with call_id })
 
 let enter_call () _ st =
   let depth = st.depth + 1 in

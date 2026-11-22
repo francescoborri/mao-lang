@@ -59,7 +59,7 @@ let tests =
         check_run
           Alcotest.(pair int int)
           Alcotest.string "call ids"
-          (Ok (0, 1), [ "a" ])
+          (Ok (1, 2), [ "a" ])
           m);
     test "call depth" (fun () ->
         let m =
