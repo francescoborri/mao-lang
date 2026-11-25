@@ -115,25 +115,10 @@ let run src max_logs max_depth extra =
           ("maxDepth", ToJs.int (Trace.max_depth t));
         ])
 
-(* the extended parser expands the abbreviations, and the expansion of x++
-   uses a name the lexer rejects, so a program that needs the extended parser
-   is not formatted: the error points to the first abbreviation *)
-let parse_for_format src extra =
-  match MaoLang.parse (lexbuf_of src) with
-  | Error e when OfJs.bool extra ->
-      MaoLang.parse_extra (lexbuf_of src)
-      |> Result.fold ~error:Result.error ~ok:(fun _ ->
-          e
-          |> Loc.map_item
-               (Fun.const
-                  "Il formattatore non supporta ancora le abbreviazioni della \
-                   versione estesa (++, --, +=, -=, *=, /=)")
-          |> Result.error)
-  | parsed -> parsed
-
 let format src extra =
+  let parse = if OfJs.bool extra then MaoLang.parse_extra else MaoLang.parse in
   guard (fun () ->
-      match parse_for_format src extra with
+      match parse (lexbuf_of src) with
       | Ok ast ->
           let output = Fmt.str "%a@." MaoLang.Ast_pp.pp_command ast in
           ToJs.obj [ ("ok", ToJs.bool true); ("output", ToJs.str output) ]

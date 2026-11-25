@@ -12,3 +12,8 @@
  (public_name mao_fmt)
  (name mao_fmt)
  (libraries maoLang))
+
+(executable
+ (name mao_fmt_extra)
+ (public_name mao_fmt_extra)
+ (libraries maoLang loc fmt))

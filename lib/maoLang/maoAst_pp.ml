@@ -74,10 +74,16 @@ let pp_decl_lhs fmt ds =
         (x :: List.map snd xs)
   | _ -> Fmt.pf fmt "%a" (Fmt.list ~sep:(Fmt.any ", ") pp_typed_var) ds
 
+(* x++ on an int, x++. on a double *)
+let pp_sugared_op fmt (op, t) =
+  let op = match op with Inc -> "++" | Dec -> "--" in
+  let suffix = match t with DoubleType -> "." | _ -> "" in
+  Fmt.pf fmt "%s%s" op suffix
+
 let rec pp_expr fmt Loc.{ it = e } =
   let is_atomic = function
     | Var _ | Val _ | ArrayLoad _ | NewArrayDefault _ | NewArrayLiteral _
-    | ArrayLength _ | Call _ | ExprBlock _ | Ternary _ ->
+    | ArrayLength _ | Call _ | ExprBlock _ | Ternary _ | SugaredExpr _ ->
         true
     | BinOp _ | UnOp _ | Cast _ -> false
   in
@@ -88,8 +94,13 @@ let rec pp_expr fmt Loc.{ it = e } =
   match e with
   | Var id -> Fmt.string fmt id
   | Val v -> pp_base_val fmt v
+  | SugaredExpr (Pre, op, t, id) -> Fmt.pf fmt "%a%s" pp_sugared_op (op, t) id
+  | SugaredExpr (Post, op, t, id) -> Fmt.pf fmt "%s%a" id pp_sugared_op (op, t)
   | BinOp (e1, op, e2) ->
       Fmt.pf fmt "%a %a %a" pp_inner e1 pp_bin_op op pp_inner e2
+  (* -(--x), not ---x *)
+  | UnOp (op, ({ it = SugaredExpr (Pre, _, _, _) } as e)) ->
+      Fmt.pf fmt "%a(%a)" pp_un_op op pp_expr e
   | UnOp (op, e) -> Fmt.pf fmt "%a%a" pp_un_op op pp_inner e
   | ArrayLoad (id, e) -> Fmt.pf fmt "%s[%a]" id pp_expr e
   | NewArrayDefault (t, e) -> Fmt.pf fmt "new %a[%a]" pp_base_type t pp_expr e
@@ -129,6 +140,9 @@ and pp_command fmt { it = c } =
           ids
           (Fmt.list ~sep:(Fmt.any ", ") pp_expr)
           es
+    | SugaredCmd (op, t, id) -> Fmt.pf fmt "%s%a;" id pp_sugared_op (op, t)
+    | SugaredCmdAssign (id, bin_op, e) ->
+        Fmt.pf fmt "%s %a= %a;" id pp_bin_op bin_op pp_expr e
     | ArrayStore (id, e1, e2) ->
         Fmt.pf fmt "%s[%a] := %a;" id pp_expr e1 pp_expr e2
     | Seq (c1, c2) -> Fmt.pf fmt "%a@,%a" pp_command c1 pp_command c2

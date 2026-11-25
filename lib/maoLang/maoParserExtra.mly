@@ -1,31 +1,11 @@
 %{
   open MaoAst
-  open Utils
-
-  type assign_expr_kind = Pre | Post
 
   let unpack_string (start_pos, end_pos) s =
     String.to_seq s |> List.of_seq
     |> List.map (fun c -> Loc.with_positions ~start_pos ~end_pos (CharVal c))
   
   let l (start_pos, end_pos) x = Loc.with_positions ~start_pos ~end_pos x
-
-  let build_assign_expr ~var_type ~kind id op loc =
-  let ll x = l loc x in
-    let one =
-      match var_type with
-      | IntType -> ll @@ Val (ll @@ IntVal (Int64.of_int 1))
-      | DoubleType -> ll @@ Val (ll @@ DoubleVal 1.0)
-      | _ -> unreachable "build_assign_expr: unsupported variable type"
-    in
-    let id_op_one = ll @@ BinOp (ll @@ Var id, op, one) in
-    let save_in_tmp =
-      ll @@ Declare ([ (BaseType var_type, ("_tmp_" ^ id)) ], Some [ll @@ Var id ])
-    in
-    let assign = ll @@ Assign ([ id ], [ id_op_one ]) in
-    match kind with
-    | Pre -> ExprBlock (assign, ll @@ Var id)
-    | Post -> ExprBlock (ll @@ Seq (save_in_tmp, assign), ll @@ Var ("_tmp_" ^ id))
 %}
 
 %token <string> IDENT
@@ -86,6 +66,18 @@ signed_val:
 | MINUS i = INT { l $loc @@ IntVal (Int64.neg i) }
 | MINUS d = DOUBLE { l $loc @@ DoubleVal (-.d) }
 
+%inline inc_dec:
+| INT_INC { Inc, IntType }
+| DOUBLE_INC { Inc, DoubleType }
+| INT_DEC { Dec, IntType }
+| DOUBLE_DEC { Dec, DoubleType }
+
+%inline compound_assign:
+| PLUS_ASSIGN { Add }
+| MINUS_ASSIGN { Sub }
+| TIMES_ASSIGN { Mul }
+| DIV_ASSIGN { Div }
+
 typed_var:
 | t = mao_type id = IDENT { t, id }
 
@@ -93,14 +85,8 @@ atom_expr:
 | id = IDENT { l $loc @@ Var id }
 | v = base_val { l $loc @@ Val v }
 | id = IDENT LPAREN es = separated_list(COMMA, expr) RPAREN { l $loc @@ Call (id, es) }
-| INT_INC ; id = IDENT { l $loc @@ build_assign_expr ~var_type:IntType ~kind:Pre id Add $loc }
-| id = IDENT ; INT_INC { l $loc @@ build_assign_expr ~var_type:IntType ~kind:Post id Add $loc }
-| DOUBLE_INC ; id = IDENT { l $loc @@ build_assign_expr ~var_type:DoubleType ~kind:Pre id Add $loc }
-| id = IDENT ; DOUBLE_INC { l $loc @@ build_assign_expr ~var_type:DoubleType ~kind:Post id Add $loc }
-| INT_DEC ; id = IDENT { l $loc @@ build_assign_expr ~var_type:IntType ~kind:Pre id Sub $loc }
-| id = IDENT ; INT_DEC { l $loc @@ build_assign_expr ~var_type:IntType ~kind:Post id Sub $loc }
-| DOUBLE_DEC ; id = IDENT { l $loc @@ build_assign_expr ~var_type:DoubleType ~kind:Pre id Sub $loc }
-| id = IDENT ; DOUBLE_DEC { l $loc @@ build_assign_expr ~var_type:DoubleType ~kind:Post id Sub $loc }
+| op = inc_dec id = IDENT { let op, t = op in l $loc @@ SugaredExpr (Pre, op, t, id) }
+| id = IDENT op = inc_dec { let op, t = op in l $loc @@ SugaredExpr (Post, op, t, id) }
 | id = IDENT LBRACKET e = expr RBRACKET { l $loc @@ ArrayLoad (id, e) }
 | id = IDENT DOT_LENGTH { l $loc @@ ArrayLength id }
 | NEW t = base_type LBRACKET e = expr RBRACKET { l $loc @@ NewArrayDefault (t, e) }
@@ -112,21 +98,24 @@ atom_expr:
 | LPAREN e1 = expr QUESTION_MARK e2 = expr COLON e3 = expr RPAREN { l $loc @@ Ternary (e1, e2, e3) }
 | LPAREN e = expr RPAREN { e }
 
+%inline bin_op:
+| PLUS { Add }
+| MINUS { Sub }
+| TIMES { Mul }
+| DIV { Div }
+| MOD { Mod }
+| AND { And }
+| OR { Or }
+| XOR { Xor }
+| EQ { Eq }
+| NEQ { Neq }
+| LT { Lt }
+| LEQ { Leq }
+| GT { Gt }
+| GEQ { Geq }
+
 expr:
-| e1 = expr PLUS e2 = expr { l $loc @@ BinOp (e1, Add, e2) }
-| e1 = expr MINUS e2 = expr { l $loc @@ BinOp (e1, Sub, e2) }
-| e1 = expr TIMES e2 = expr { l $loc @@ BinOp (e1, Mul, e2) }
-| e1 = expr DIV e2 = expr { l $loc @@ BinOp (e1, Div, e2) }
-| e1 = expr MOD e2 = expr { l $loc @@ BinOp (e1, Mod, e2) }
-| e1 = expr AND e2 = expr { l $loc @@ BinOp (e1, And, e2) }
-| e1 = expr OR e2 = expr { l $loc @@ BinOp (e1, Or, e2) }
-| e1 = expr XOR e2 = expr { l $loc @@ BinOp (e1, Xor, e2) }
-| e1 = expr EQ e2 = expr { l $loc @@ BinOp (e1, Eq, e2) }
-| e1 = expr NEQ e2 = expr { l $loc @@ BinOp (e1, Neq, e2) }
-| e1 = expr LT e2 = expr { l $loc @@ BinOp (e1, Lt, e2) }
-| e1 = expr LEQ e2 = expr { l $loc @@ BinOp (e1, Leq, e2) }
-| e1 = expr GT e2 = expr { l $loc @@ BinOp (e1, Gt, e2) }
-| e1 = expr GEQ e2 = expr { l $loc @@ BinOp (e1, Geq, e2) }
+| e1 = expr op = bin_op e2 = expr { l $loc @@ BinOp (e1, op, e2) }
 | NOT e = expr { l $loc @@ UnOp (Not, e) }
 | MINUS e = expr %prec UMINUS { l $loc @@ UnOp (Neg, e) }
 | a = atom_expr { a }
@@ -150,22 +139,8 @@ command:
 | ds = decl_lhs es = decl_rhs SEMICOLON { l $loc @@ Declare (ds, es) }
 | ids = separated_nonempty_list(COMMA, IDENT) ASSIGN es = separated_nonempty_list(COMMA, expr) SEMICOLON
  { l $loc @@ Assign (ids, es) }
-| id = IDENT INT_INC SEMICOLON
-  { l $loc @@ Assign ([id], [ l $loc @@ BinOp ( l $loc @@ Var id, Add, l $loc @@ Val (l $loc @@ IntVal 1L))]) }
-| id = IDENT DOUBLE_INC SEMICOLON
-  { l $loc @@ Assign ([id], [ l $loc @@ BinOp ( l $loc @@ Var id, Add, l $loc @@ Val (l $loc @@ DoubleVal 1.0))]) }
-| id = IDENT INT_DEC SEMICOLON
-  { l $loc @@ Assign ([id], [ l $loc @@ BinOp ( l $loc @@ Var id, Sub, l $loc @@ Val (l $loc @@ IntVal 1L))]) }
-| id = IDENT DOUBLE_DEC SEMICOLON
-  { l $loc @@ Assign ([id], [ l $loc @@ BinOp ( l $loc @@ Var id, Sub, l $loc @@ Val (l $loc @@ DoubleVal 1.0))]) }
-| id = IDENT ; PLUS_ASSIGN ; e = expr SEMICOLON
- { l $loc @@ Assign ([ id ], [ l $loc @@ BinOp (l $loc @@ Var id, Add, e) ]) }
-| id = IDENT ; MINUS_ASSIGN ; e = expr SEMICOLON
- { l $loc @@ Assign ([ id ], [ l $loc @@ BinOp (l $loc @@ Var id, Sub, e) ]) }
-| id = IDENT ; TIMES_ASSIGN ; e = expr SEMICOLON
- { l $loc @@ Assign ([ id ], [ l $loc @@ BinOp (l $loc @@ Var id, Mul, e) ]) }   
-| id = IDENT ; DIV_ASSIGN ; e = expr SEMICOLON
-  { l $loc @@ Assign ([ id ], [ l $loc @@ BinOp (l $loc @@ Var id, Div, e) ]) }
+| id = IDENT op = inc_dec SEMICOLON { let op, t = op in l $loc @@ SugaredCmd (op, t, id) }
+| id = IDENT op = compound_assign e = expr SEMICOLON { l $loc @@ SugaredCmdAssign (id, op, e) }
 | id = IDENT LBRACKET e1 = expr RBRACKET ASSIGN e2 = expr SEMICOLON
   { l $loc @@ ArrayStore (id, e1, e2) }
 | IF LPAREN e = expr RPAREN LBRACE cs1 = commands RBRACE ELSE LBRACE cs2 = commands RBRACE

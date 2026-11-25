@@ -11,4 +11,5 @@ let () =
       ("Interpreter", TestInterpreter.tests);
       ("Trace", TestTrace.tests);
       ("MaoLang", TestMaoLang.tests);
+      ("Extra", TestExtra.tests);
     ]

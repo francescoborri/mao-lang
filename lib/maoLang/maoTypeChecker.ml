@@ -1,5 +1,6 @@
 open MaoAst
 open MaoAst_pp
+open MaoDesugar
 open MaoDataStructure
 open Utils
 open Result.Syntax
@@ -104,7 +105,7 @@ let check_un_op ~e_loc op t =
   | Neg, wrong -> type_error ~loc:e_loc (BaseType IntType) wrong
   | Not, wrong -> type_error ~loc:e_loc (BaseType BoolType) wrong
 
-let rec type_check_expr env Loc.{ it = e; at = loc } =
+let rec type_check_expr env (Loc.{ it = e; at = loc } as expr) =
   match e with
   | Val ({ it = IntVal _ } as v) ->
       Result.ok (BaseType IntType, Loc.with_loc ~loc (CVal v))
@@ -120,6 +121,7 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
           Result.ok (t, Loc.with_loc ~loc (CVar id))
       | Some (FuncType _ as t) -> not_a_variable_error ~loc id t
       | None -> undefined_variable_error ~loc id)
+  | SugaredExpr _ -> type_check_expr env (desugar_expr expr)
   | BinOp (e1, op, e2) ->
       let* t1, c_e1 = type_check_expr env e1 in
       let* t2, c_e2 = type_check_expr env e2 in
@@ -219,7 +221,7 @@ let rec type_check_expr env Loc.{ it = e; at = loc } =
           Result.ok (t2, Loc.with_loc ~loc (CTernary (c_e1, c_e2, c_e3)))
         else type_error ~loc:e3.at t2 t3
 
-and type_check_command env { it = c; at = loc } =
+and type_check_command env ({ it = c; at = loc } as cmd) =
   match c with
   | Skip -> Result.ok (env, Loc.with_loc ~loc CSkip)
   | Declare (ds, None) ->
@@ -267,6 +269,8 @@ and type_check_command env { it = c; at = loc } =
       Result.ok (env, Loc.with_loc ~loc c_c)
   | Assign (ids, es) ->
       count_error ~loc ~expected:(List.length ids) ~got:(List.length es)
+  | SugaredCmd _ | SugaredCmdAssign _ ->
+      type_check_command env (desugar_command cmd)
   | ArrayStore (id, e1, e2) -> (
       match Env.find_opt id env with
       | Some (CompositeType (Array t)) ->

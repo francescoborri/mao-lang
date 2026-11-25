@@ -7,6 +7,8 @@ type mao_type =
   | FuncType of mao_type list * mao_type option
 
 type typed_var = mao_type * string
+type sugared_op = Inc | Dec
+type fix = Pre | Post
 
 type bin_op =
   | Add
@@ -40,6 +42,7 @@ and command = command_node Loc.t
 and expr_node =
   | Val of base_val
   | Var of string
+  | SugaredExpr of fix * sugared_op * base_type * string
   | BinOp of expr * bin_op * expr
   | UnOp of un_op * expr
   | ArrayLoad of string * expr
@@ -55,6 +58,8 @@ and command_node =
   | Skip
   | Declare of typed_var list * expr list option
   | Assign of string list * expr list
+  | SugaredCmd of sugared_op * base_type * string
+  | SugaredCmdAssign of string * bin_op * expr
   | ArrayStore of string * expr * expr
   | Seq of command * command
   | IfThenElse of expr * command * command

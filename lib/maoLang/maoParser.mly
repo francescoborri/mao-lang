@@ -82,21 +82,24 @@ atom_expr:
 | LPAREN e1 = expr QUESTION_MARK e2 = expr COLON e3 = expr RPAREN { l $loc @@ Ternary (e1, e2, e3) }
 | LPAREN e = expr RPAREN { e }
 
+%inline bin_op:
+| PLUS { Add }
+| MINUS { Sub }
+| TIMES { Mul }
+| DIV { Div }
+| MOD { Mod }
+| AND { And }
+| OR { Or }
+| XOR { Xor }
+| EQ { Eq }
+| NEQ { Neq }
+| LT { Lt }
+| LEQ { Leq }
+| GT { Gt }
+| GEQ { Geq }
+
 expr:
-| e1 = expr PLUS e2 = expr { l $loc @@ BinOp (e1, Add, e2) }
-| e1 = expr MINUS e2 = expr { l $loc @@ BinOp (e1, Sub, e2) }
-| e1 = expr TIMES e2 = expr { l $loc @@ BinOp (e1, Mul, e2) }
-| e1 = expr DIV e2 = expr { l $loc @@ BinOp (e1, Div, e2) }
-| e1 = expr MOD e2 = expr { l $loc @@ BinOp (e1, Mod, e2) }
-| e1 = expr AND e2 = expr { l $loc @@ BinOp (e1, And, e2) }
-| e1 = expr OR e2 = expr { l $loc @@ BinOp (e1, Or, e2) }
-| e1 = expr XOR e2 = expr { l $loc @@ BinOp (e1, Xor, e2) }
-| e1 = expr EQ e2 = expr { l $loc @@ BinOp (e1, Eq, e2) }
-| e1 = expr NEQ e2 = expr { l $loc @@ BinOp (e1, Neq, e2) }
-| e1 = expr LT e2 = expr { l $loc @@ BinOp (e1, Lt, e2) }
-| e1 = expr LEQ e2 = expr { l $loc @@ BinOp (e1, Leq, e2) }
-| e1 = expr GT e2 = expr { l $loc @@ BinOp (e1, Gt, e2) }
-| e1 = expr GEQ e2 = expr { l $loc @@ BinOp (e1, Geq, e2) }
+| e1 = expr op = bin_op e2 = expr { l $loc @@ BinOp (e1, op, e2) }
 | NOT e = expr { l $loc @@ UnOp (Not, e) }
 | MINUS e = expr %prec UMINUS { l $loc @@ UnOp (Neg, e) }
 | a = atom_expr { a }
