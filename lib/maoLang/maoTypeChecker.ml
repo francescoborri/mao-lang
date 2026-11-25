@@ -36,6 +36,18 @@ let arity_error ~loc kind id ~expected ~got =
     "numero di argomenti errato per la %s '%s': attesi %d, passati %d" kind id
     expected got
 
+let step_error ~loc op id t =
+  error_with_loc ~loc
+    "'%a' si applica solo a variabili int o double, ma '%s' ha tipo %a"
+    pp_sugared_op op id pp_mao_type t
+
+let step_type ~loc env op id =
+  match Env.find_opt id env with
+  | Some (BaseType ((IntType | DoubleType) as t)) -> Result.ok t
+  | Some (FuncType _ as t) -> not_a_variable_error ~loc id t
+  | Some t -> step_error ~loc op id t
+  | None -> undefined_variable_error ~loc id
+
 let count_error ~loc ~expected ~got =
   error_with_loc ~loc "numero di espressioni errato: attese %d, trovate %d"
     expected got
@@ -105,7 +117,7 @@ let check_un_op ~e_loc op t =
   | Neg, wrong -> type_error ~loc:e_loc (BaseType IntType) wrong
   | Not, wrong -> type_error ~loc:e_loc (BaseType BoolType) wrong
 
-let rec type_check_expr env (Loc.{ it = e; at = loc } as expr) =
+let rec type_check_expr env Loc.{ it = e; at = loc } =
   match e with
   | Val ({ it = IntVal _ } as v) ->
       Result.ok (BaseType IntType, Loc.with_loc ~loc (CVal v))
@@ -121,7 +133,9 @@ let rec type_check_expr env (Loc.{ it = e; at = loc } as expr) =
           Result.ok (t, Loc.with_loc ~loc (CVar id))
       | Some (FuncType _ as t) -> not_a_variable_error ~loc id t
       | None -> undefined_variable_error ~loc id)
-  | SugaredExpr _ -> type_check_expr env (desugar_expr expr)
+  | SugaredExpr (fix, op, id) ->
+      let* t = step_type ~loc env op id in
+      type_check_expr env (step_expr ~loc fix op t id)
   | BinOp (e1, op, e2) ->
       let* t1, c_e1 = type_check_expr env e1 in
       let* t2, c_e2 = type_check_expr env e2 in
@@ -221,7 +235,7 @@ let rec type_check_expr env (Loc.{ it = e; at = loc } as expr) =
           Result.ok (t2, Loc.with_loc ~loc (CTernary (c_e1, c_e2, c_e3)))
         else type_error ~loc:e3.at t2 t3
 
-and type_check_command env ({ it = c; at = loc } as cmd) =
+and type_check_command env { it = c; at = loc } =
   match c with
   | Skip -> Result.ok (env, Loc.with_loc ~loc CSkip)
   | Declare (ds, None) ->
@@ -269,8 +283,11 @@ and type_check_command env ({ it = c; at = loc } as cmd) =
       Result.ok (env, Loc.with_loc ~loc c_c)
   | Assign (ids, es) ->
       count_error ~loc ~expected:(List.length ids) ~got:(List.length es)
-  | SugaredCmd _ | SugaredCmdAssign _ ->
-      type_check_command env (desugar_command cmd)
+  | SugaredCmd (op, id) ->
+      let* t = step_type ~loc env op id in
+      type_check_command env (step_assign ~loc op t id)
+  | SugaredCmdAssign (id, bin_op, e) ->
+      type_check_command env (compound_assign ~loc id bin_op e)
   | ArrayStore (id, e1, e2) -> (
       match Env.find_opt id env with
       | Some (CompositeType (Array t)) ->

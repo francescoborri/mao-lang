@@ -76,10 +76,8 @@ rule read = parse
 | white { read lexbuf }
 | line_comment { read lexbuf }
 | open_multiline_comment { comment lexbuf; read lexbuf }
-| "++" { INT_INC }
-| "++." { DOUBLE_INC }
-| "--." { DOUBLE_DEC }
-| "--" { INT_DEC }
+| "++" { INC }
+| "--" { DEC }
 | "+=" { PLUS_ASSIGN }
 | "-=" { MINUS_ASSIGN }
 | "*=" { TIMES_ASSIGN }

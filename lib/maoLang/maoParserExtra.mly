@@ -18,7 +18,7 @@
 %token SKIP ASSIGN DECLARE IF ELSE WHILE
 %token NEW RETURN
 %token PLUS MINUS TIMES DIV MOD
-%token INT_INC INT_DEC DOUBLE_INC DOUBLE_DEC
+%token INC DEC
 %token PLUS_ASSIGN MINUS_ASSIGN TIMES_ASSIGN DIV_ASSIGN
 %token AND OR XOR NOT
 %token EQ NEQ LT LEQ GT GEQ
@@ -67,10 +67,8 @@ signed_val:
 | MINUS d = DOUBLE { l $loc @@ DoubleVal (-.d) }
 
 %inline inc_dec:
-| INT_INC { Inc, IntType }
-| DOUBLE_INC { Inc, DoubleType }
-| INT_DEC { Dec, IntType }
-| DOUBLE_DEC { Dec, DoubleType }
+| INC { Inc }
+| DEC { Dec }
 
 %inline compound_assign:
 | PLUS_ASSIGN { Add }
@@ -85,8 +83,8 @@ atom_expr:
 | id = IDENT { l $loc @@ Var id }
 | v = base_val { l $loc @@ Val v }
 | id = IDENT LPAREN es = separated_list(COMMA, expr) RPAREN { l $loc @@ Call (id, es) }
-| op = inc_dec id = IDENT { let op, t = op in l $loc @@ SugaredExpr (Pre, op, t, id) }
-| id = IDENT op = inc_dec { let op, t = op in l $loc @@ SugaredExpr (Post, op, t, id) }
+| op = inc_dec id = IDENT { l $loc @@ SugaredExpr (Pre, op, id) }
+| id = IDENT op = inc_dec { l $loc @@ SugaredExpr (Post, op, id) }
 | id = IDENT LBRACKET e = expr RBRACKET { l $loc @@ ArrayLoad (id, e) }
 | id = IDENT DOT_LENGTH { l $loc @@ ArrayLength id }
 | NEW t = base_type LBRACKET e = expr RBRACKET { l $loc @@ NewArrayDefault (t, e) }
@@ -139,7 +137,7 @@ command:
 | ds = decl_lhs es = decl_rhs SEMICOLON { l $loc @@ Declare (ds, es) }
 | ids = separated_nonempty_list(COMMA, IDENT) ASSIGN es = separated_nonempty_list(COMMA, expr) SEMICOLON
  { l $loc @@ Assign (ids, es) }
-| id = IDENT op = inc_dec SEMICOLON { let op, t = op in l $loc @@ SugaredCmd (op, t, id) }
+| id = IDENT op = inc_dec SEMICOLON { l $loc @@ SugaredCmd (op, id) }
 | id = IDENT op = compound_assign e = expr SEMICOLON { l $loc @@ SugaredCmdAssign (id, op, e) }
 | id = IDENT LBRACKET e1 = expr RBRACKET ASSIGN e2 = expr SEMICOLON
   { l $loc @@ ArrayStore (id, e1, e2) }

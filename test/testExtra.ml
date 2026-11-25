@@ -28,8 +28,8 @@ let tests =
             ("a", int 5); ("b", int 6); ("c", int 7); ("d", int 7); ("e", int 5);
           ];
         check_values ~extra:true
-          "double x = 1.5; double a = x++.; double b = ++.x; double c = x--.; \
-           double d = --.x;"
+          "double x = 1.5; double a = x++; double b = ++x; double c = x--; \
+           double d = --x;"
           [
             ("a", double 1.5);
             ("b", double 3.5);
@@ -37,7 +37,7 @@ let tests =
             ("d", double 1.5);
           ];
         check_values ~extra:true
-          "int x = 0; x++; x++; x--; double d = 0.0; d++.; d--.; d--.;"
+          "int x = 0; x++; x++; x--; double d = 0.0; d++; d--; d--;"
           [ ("x", int 1); ("d", double (-1.0)) ]);
     test "compound assignments" (fun () ->
         check_values ~extra:true "int x = 1; x += 10; x -= 2; x *= 3; x /= 4;"
@@ -77,7 +77,7 @@ let tests =
             ("int x = 1 - -1; x := x - 1;", [ ("x", int 1) ]);
           ]);
     test "abbreviations are rejected by the base parser" (fun () ->
-        List.iter (rejects parse) [ "x++;"; "int y = ++x;"; "x += 1;"; "d--.;" ]);
+        List.iter (rejects parse) [ "x++;"; "int y = ++x;"; "x += 1;"; "d--;" ]);
     test "syntax errors" (fun () ->
         List.iter (rejects parse_extra)
           [
@@ -87,15 +87,15 @@ let tests =
             "x += ;";
             "x++ ++;";
             "x, y += 1, 2;";
+            "double d = 0.0; d++.;";
           ]);
     test "type errors" (fun () ->
         List.iter
           (check_fails ~extra:true TypeError)
           [
             "bool b = true; b++;";
-            "int x = 0; x++.;";
-            "double d = 0.0; d++;";
-            "int x = 0; double d = x--.;";
+            "char c = 'a'; int y = ++c;";
+            "int x = 0; double d = x--;";
             "int[] a = [1]; a++;";
             "int f() 1 f++;";
             "z += 1;";
@@ -111,11 +111,19 @@ let tests =
             Alcotest.(check (pair int int)) "position" at at')
           [
             ( "bool b = true;\nb++;",
-              "Errore di tipo: atteso il tipo int, trovato bool",
+              "Errore di tipo: '++' si applica solo a variabili int o double, \
+               ma 'b' ha tipo bool",
               (2, 1) );
-            ( "int x = 1;\ndouble y = x++.;",
+            ( "int x = 1;\ndouble y = x++;",
               "Errore di tipo: atteso il tipo double, trovato int",
               (2, 12) );
+            ( "int[] a = [1];\nint y = a++;",
+              "Errore di tipo: '++' si applica solo a variabili int o double, \
+               ma 'a' ha tipo int[]",
+              (2, 9) );
+            ( "int f() 1 f--;",
+              "Errore di tipo: 'f' è una funzione, non una variabile",
+              (1, 11) );
             ("z += 1;", "Errore di tipo: 'z' non è stato dichiarato", (1, 1));
           ]);
     test "the expansion of x++ is traced at the abbreviation" (fun () ->
@@ -127,9 +135,9 @@ let tests =
         in
         Alcotest.(check (list int)) "columns" [ 9; 9; 1 ] cols);
     test "formatting" (fun () ->
-        parses_as "x++; d++.; y--; e--.;" "x++;\nd++.;\ny--;\ne--.;";
-        parses_as "int y = ++x + x++ - --.d * d--.;"
-          "int y = (++x + x++) - (--.d * d--.);";
+        parses_as "x++; y--;" "x++;\ny--;";
+        parses_as "int y = ++x + x++ - --d * d--;"
+          "int y = (++x + x++) - (--d * d--);";
         parses_as "x += 1; x -= y++; x *= 2 + 3; x /= 4;"
           "x += 1;\nx -= y++;\nx *= 2 + 3;\nx /= 4;";
         parses_as "int y = -(--x); int z = -x--;"
@@ -142,16 +150,22 @@ let tests =
             Alcotest.(check string) src out (format out);
             check_values ~extra:true out bindings)
           [
-            ( "int x = 5; double d = 1.5; int y = x++ + ++x; double e = d++. * \
-               --.d; x--; d++.;",
+            ( "int x = 5; double d = 1.5; int y = x++ + ++x; double e = d++ * \
+               --d; x--; d++;",
               [
                 ("x", int 6);
                 ("y", int 12);
                 ("d", double 2.5);
                 ("e", double 2.25);
               ] );
-            ( "int x = 3; int y = -(--x); int z = -x--; x += y; x *= 2;",
-              [ ("x", int (-2)); ("y", int (-2)); ("z", int (-2)) ] );
+            ( "int x = 3; int y = -(--x); int z = -x--; x += y; x *= 2; double \
+               d = 1.0; double e = -(++d);",
+              [
+                ("x", int (-2));
+                ("y", int (-2));
+                ("z", int (-2));
+                ("e", double (-2.0));
+              ] );
             ( "int[] a = [1, 2, 3]; int i = 0; while (i < 3) { a[i] := a[i] + \
                1; i++; } int f(int n) { n += 1; return n--; } int r = f(i++);",
               [ ("i", int 4); ("r", int 4) ] );
