@@ -4,6 +4,11 @@
  (libraries maoLang loc fmt))
 
 (executable
+ (name mao_run_extra)
+ (public_name mao_run_extra)
+ (libraries maoLang loc fmt))
+
+(executable
  (public_name mao_fmt)
  (name mao_fmt)
  (libraries maoLang))

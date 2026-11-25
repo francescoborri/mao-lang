@@ -5,13 +5,28 @@
  (modules maoParser)
  (flags --table))
 
+(ocamllex
+ (modules maoLexerExtra))
+
+(menhir
+ (modules maoParserExtra)
+ (flags --table))
+
 (rule
- (targets maoParser_messages.ml)
+ (target maoParser_messages.ml)
  (deps maoParser.messages maoParser.mly)
  (action
   (with-stdout-to
-   %{targets}
+   %{target}
    (run menhir --compile-errors maoParser.messages maoParser.mly))))
+
+(rule
+ (target maoParserExtra_messages.ml)
+ (deps maoParserExtra.messages maoParserExtra.mly)
+ (action
+  (with-stdout-to
+   %{target}
+   (run menhir --compile-errors maoParserExtra.messages maoParserExtra.mly))))
 
 (library
  (name maoLang)
@@ -23,7 +38,10 @@
   maoDataStructure_pp
   maoLexer
   maoParser
+  maoLexerExtra
+  maoParserExtra
   maoParser_messages
+  maoParserExtra_messages
   maoTypeChecker
   maoInterpreter
   maoTrace)
