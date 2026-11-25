@@ -5,6 +5,7 @@
   const runBtn = $("run"), cancelBtn = $("cancel"), formatBtn = $("format");
   const statusEl = $("status"), diagEl = $("diag");
   const maxLogsEl = $("maxLogs"), maxDepthEl = $("maxDepth");
+  const langBtns = { false: $("langBase"), true: $("langExtra") };
 
   const KINDS = ["decl", "assign", "store", "branch", "def", "call", "invoke"];
   const KIND_LABEL = {
@@ -13,6 +14,7 @@
     invoke: "invocazioni di procedura",
   };
   const STORAGE_KEY = "mao.source";
+  const EXTRA_KEY = "mao.extra";
   const INDENT = "    ";
   const SAMPLES_DIR = "samples/";
   const INFO_URL = "info.html";
@@ -57,7 +59,7 @@
       ],
       "class-name": /\b(?:int|bool|double|char)\b/,
       boolean: /\b(?:true|false)\b/,
-      operator: /:=|&&|\|\||==|!=|<=|>=|\bxor\b|[-+*\/%!<>=?:]/,
+      operator: /\+\+\.?|--\.?|[-+*\/]=|:=|&&|\|\||==|!=|<=|>=|\bxor\b|[-+*\/%!<>=?:]/,
       number: /\b\d+\.\d*|\.\d+|\b\d+\b/,
       function: /\b[A-Za-z][A-Za-z0-9_]*(?=\s*\()/,
       punctuation: /[()[\]{},;.]/,
@@ -84,6 +86,7 @@
 
   const S = {
     state: "loading",
+    extra: false,
     sid: 0,
     runSource: null,
     total: 0,
@@ -148,6 +151,7 @@
     cancelBtn.disabled = next !== "running";
     maxLogsEl.disabled = next === "running";
     maxDepthEl.disabled = next === "running";
+    for (const b of Object.values(langBtns)) b.disabled = next === "running";
     setStatus(message, { loading: "busy", running: "busy", failed: "error" }[next]);
   }
 
@@ -435,7 +439,7 @@
     ticker = setInterval(() => setStatus(`Esecuzione… ${elapsed()} s`, "busy"), 100);
     let res;
     try {
-      res = await rpc("run", source, readLimit(maxLogsEl), readLimit(maxDepthEl));
+      res = await rpc("run", source, readLimit(maxLogsEl), readLimit(maxDepthEl), S.extra);
     } catch (e) {
       stopTicker();
       if (sid === S.sid) { setState("idle", "Pronto"); report(e); }
@@ -469,7 +473,7 @@
     if (S.state !== "idle") return;
     const source = src.value;
     let r;
-    try { r = await rpc("format", source); } catch (e) { report(e); return; }
+    try { r = await rpc("format", source, S.extra); } catch (e) { report(e); return; }
     if (src.value !== source) return;
     if (r.ok) {
       if (r.output !== source && hasComments(source) &&
@@ -886,6 +890,17 @@
     if (infoState === "empty") loadInfo();
   }
 
+  // extra is the extended language, with the abbreviations ++, += and similar
+  function setLang(extra, announce) {
+    S.extra = extra;
+    for (const [k, b] of Object.entries(langBtns)) b.setAttribute("aria-pressed", String(k === String(extra)));
+    try { localStorage.setItem(EXTRA_KEY, String(extra)); } catch (_) {  }
+    if (announce && S.state === "idle") setStatus(extra ? "Versione estesa del linguaggio" : "Versione base del linguaggio");
+  }
+  for (const [k, b] of Object.entries(langBtns)) {
+    b.addEventListener("click", () => { if (String(S.extra) !== k) setLang(k === "true", true); });
+  }
+
   runBtn.addEventListener("click", run);
   cancelBtn.addEventListener("click", cancel);
   formatBtn.addEventListener("click", format);
@@ -944,6 +959,7 @@
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) src.value = saved;
+    setLang(localStorage.getItem(EXTRA_KEY) === "true", false);
   } catch (_) {  }
   renderSyntax();
   renderGutter();

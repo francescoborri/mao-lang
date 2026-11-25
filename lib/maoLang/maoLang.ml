@@ -98,49 +98,32 @@ let syntax_error state_hint lexbuf checkpoint =
        ~end_pos:(Lexing.lexeme_end_p lexbuf)
   |> Result.error
 
-let parse lexbuf =
-  let supplier = I.lexer_lexbuf_to_supplier MaoLexer.read lexbuf in
-  let start = MaoParser.Incremental.program lexbuf.Lexing.lex_curr_p in
+let parse_with (type token) (module P : PARSER with type token = token) lexer
+    lexbuf =
+  let supplier = P.I.lexer_lexbuf_to_supplier lexer lexbuf in
+  let start = P.program lexbuf.Lexing.lex_curr_p in
   try
-    I.loop_handle Result.ok
-      (syntax_error MaoParserModule.state_hint lexbuf)
-      supplier start
-  with MaoLexer.Error msg ->
+    P.I.loop_handle Result.ok (syntax_error P.state_hint lexbuf) supplier start
+  with MaoLexer.Error msg | MaoLexerExtra.Error msg ->
     msg |> Loc.map_item (Fmt.str "Errore lessicale: %s") |> Result.error
+
+let parse = parse_with (module MaoParserModule) MaoLexer.read
+let parse_extra = parse_with (module MaoParserExtraModule) MaoLexerExtra.read
 
 let type_check =
   MaoTypeChecker.type_check_program
   >> Result.map_error (Loc.map_item (Fmt.str "Errore di tipo: %s"))
 
-let parse_type_check_with (type token)
-    (module P : PARSER with type token = token) lexer lexbuf =
-  let supplier = P.I.lexer_lexbuf_to_supplier lexer lexbuf in
-  let start = P.program lexbuf.Lexing.lex_curr_p in
-  try
-    let parsed =
-      P.I.loop_handle Result.ok
-        (syntax_error P.state_hint lexbuf)
-        supplier start
-    in
-    Result.bind parsed type_check
-  with
-  | MaoLexer.Error msg ->
-      msg |> Loc.map_item (Fmt.str "Errore lessicale: %s") |> Result.error
-  | MaoLexerExtra.Error msg ->
-      msg |> Loc.map_item (Fmt.str "Errore lessicale: %s") |> Result.error
-
-let parse_type_check lexbuf =
-  parse_type_check_with (module MaoParserModule) MaoLexer.read lexbuf
-
-let parse_type_check_extra lexbuf =
-  parse_type_check_with (module MaoParserExtraModule) MaoLexerExtra.read lexbuf
+let parse_type_check lexbuf = Result.bind (parse lexbuf) type_check
+let parse_type_check_extra lexbuf = Result.bind (parse_extra lexbuf) type_check
 
 let execute c_ast =
   let open ReaderStateResultMonad.Syntax in
   MaoInterpreter.run_program c_ast
   =&> Loc.map_item (Fmt.str "Errore di esecuzione: %s")
 
-let run ?(max_logs = max_int) ?(max_depth = max_int) lexbuf =
+let run_with parse_type_check ?(max_logs = max_int) ?(max_depth = max_int)
+    lexbuf =
   let executed (r, logs) = Executed (r, logs) in
   let not_executed e = NotExecuted e in
   let module RSR = ReaderStateResultMonad in
@@ -157,19 +140,5 @@ let run ?(max_logs = max_int) ?(max_depth = max_int) lexbuf =
       |> Loc.with_loc ~loc:Loc.dummy_loc
       |> RSR.error |> RSR.run ~env |> executed |> Result.error
 
-let run_extra ?(max_logs = max_int) ?(max_depth = max_int) lexbuf =
-  let executed (r, logs) = Executed (r, logs) in
-  let not_executed e = NotExecuted e in
-  let module RSR = ReaderStateResultMonad in
-  let env = MaoInterpreter.{ max_logs; max_depth } in
-  Result.retract
-  @@
-    try
-      parse_type_check_extra lexbuf
-      |> Result.map (execute >> RSR.run ~env >> executed)
-      |> Result.map_error not_executed
-    with Utils.Unreachable msg ->
-      msg
-      |> Fmt.str "Errore interno dell'interprete: %s"
-      |> Loc.with_loc ~loc:Loc.dummy_loc
-      |> RSR.error |> RSR.run ~env |> executed |> Result.error
+let run = run_with parse_type_check
+let run_extra = run_with parse_type_check_extra

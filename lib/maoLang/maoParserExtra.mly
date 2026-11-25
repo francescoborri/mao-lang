@@ -20,12 +20,12 @@
     in
     let id_op_one = ll @@ BinOp (ll @@ Var id, op, one) in
     let save_in_tmp =
-      ll @@ Declare ([ (BaseType var_type, "_tmp") ], Some [ll @@ Var id ])
+      ll @@ Declare ([ (BaseType var_type, ("_tmp_" ^ id)) ], Some [ll @@ Var id ])
     in
     let assign = ll @@ Assign ([ id ], [ id_op_one ]) in
     match kind with
     | Pre -> ExprBlock (assign, ll @@ Var id)
-    | Post -> ExprBlock (ll @@ Seq (save_in_tmp, assign), ll @@ Var "_tmp")
+    | Post -> ExprBlock (ll @@ Seq (save_in_tmp, assign), ll @@ Var ("_tmp_" ^ id))
 %}
 
 %token <string> IDENT

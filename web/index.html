@@ -85,6 +85,7 @@
     .top {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: .6rem;
       margin-bottom: .8rem;
     }
@@ -97,6 +98,10 @@
     .top .version {
       color: var(--muted);
       font-size: .9rem;
+    }
+
+    .top .seg {
+      margin-left: .4rem;
     }
 
     .top .info-btn {
@@ -476,6 +481,29 @@
       padding: .2rem .55rem;
       font-size: .85rem;
       font-weight: 500;
+    }
+
+    .seg {
+      display: inline-flex;
+    }
+
+    .seg button {
+      border-radius: 0;
+    }
+
+    .seg button:first-child {
+      border-radius: 6px 0 0 6px;
+    }
+
+    .seg button:last-child {
+      border-radius: 0 6px 6px 0;
+      margin-left: -1px;
+    }
+
+    .seg button.secondary[aria-pressed="true"] {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border-color: var(--accent);
     }
 
     button:disabled {
@@ -944,6 +972,11 @@
     <header class="top">
       <h1>Playground Mao</h1>
       <span class="version">v1.2</span>
+      <div class="seg" role="group" aria-label="Versione del linguaggio">
+        <button id="langBase" class="secondary small" type="button" aria-pressed="true">Base</button>
+        <button id="langExtra" class="secondary small" type="button" aria-pressed="false"
+          title="Base con le abbreviazioni ++, --, +=, -=, *=, /=">Esteso</button>
+      </div>
       <button id="infoBtn" class="secondary info-btn" type="button" aria-haspopup="dialog">
         <span class="info-icon" aria-hidden="true">i</span>Aiuto
       </button>

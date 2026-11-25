@@ -5,6 +5,7 @@ module Trace = MaoLang.Trace
 module OfJs = struct
   let int n = Js.float_of_number n |> int_of_float
   let str = Js.to_string
+  let bool = Js.to_bool
   let list arr = Js.to_array arr |> Array.to_list
   let limit n = match int n with n when n > 0 -> Some n | _ -> None
 end
@@ -93,11 +94,12 @@ let lexbuf_of s = Lexing.from_string (OfJs.str s)
 let paged query offset limit =
   query ~offset:(OfJs.int offset) ~limit:(OfJs.int limit)
 
-let run src max_logs max_depth =
+let run src max_logs max_depth extra =
   guard (fun () ->
       let max_logs, max_depth = (OfJs.limit max_logs, OfJs.limit max_depth) in
+      let run = if OfJs.bool extra then MaoLang.run_extra else MaoLang.run in
       let executed, res, logs =
-        match MaoLang.run ?max_logs ?max_depth (lexbuf_of src) with
+        match run ?max_logs ?max_depth (lexbuf_of src) with
         | Executed (res, logs) -> (true, Result.map ignore res, logs)
         | NotExecuted e -> (false, Error e, [])
       in
@@ -113,9 +115,25 @@ let run src max_logs max_depth =
           ("maxDepth", ToJs.int (Trace.max_depth t));
         ])
 
-let format src =
+(* the extended parser expands the abbreviations, and the expansion of x++
+   uses a name the lexer rejects, so a program that needs the extended parser
+   is not formatted: the error points to the first abbreviation *)
+let parse_for_format src extra =
+  match MaoLang.parse (lexbuf_of src) with
+  | Error e when OfJs.bool extra ->
+      MaoLang.parse_extra (lexbuf_of src)
+      |> Result.fold ~error:Result.error ~ok:(fun _ ->
+          e
+          |> Loc.map_item
+               (Fun.const
+                  "Il formattatore non supporta ancora le abbreviazioni della \
+                   versione estesa (++, --, +=, -=, *=, /=)")
+          |> Result.error)
+  | parsed -> parsed
+
+let format src extra =
   guard (fun () ->
-      match MaoLang.parse (lexbuf_of src) with
+      match parse_for_format src extra with
       | Ok ast ->
           let output = Fmt.str "%a@." MaoLang.Ast_pp.pp_command ast in
           ToJs.obj [ ("ok", ToJs.bool true); ("output", ToJs.str output) ]
