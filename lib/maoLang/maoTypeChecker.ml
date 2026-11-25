@@ -327,7 +327,7 @@ and type_check_command env { it = c; at = loc } =
             Result.ok (env, Loc.with_loc ~loc (CInvoke (id, c_es)))
       | Some t -> expected_procedure_error ~loc id t
       | None -> undefined_variable_error ~loc id)
-  | Func (f_id, ds, t, e) ->
+  | Func (f_id, ds, t, e) -> (
       let* () =
         check_duplicate_names (List.map snd ds)
           (duplicate_parameter_error ~loc "funzione" f_id)
@@ -338,7 +338,10 @@ and type_check_command env { it = c; at = loc } =
       if t = t' then
         let env = Env.add f_id (FuncType (List.map fst ds, Some t)) env in
         Result.ok (env, Loc.with_loc ~loc (CFunc (f_id, ds, c_e)))
-      else type_error ~loc:e.at t t'
+      else
+        match e.it with
+        | ExprBlock (_, e) -> type_error ~loc:e.at t t'
+        | _ -> type_error ~loc:e.at t t')
 
 let type_check_program ast =
   let+ _, c_ast = type_check_command Env.empty ast in
