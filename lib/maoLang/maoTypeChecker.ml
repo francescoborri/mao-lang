@@ -303,7 +303,7 @@ and type_check_command env { it = c; at = loc } =
         check_duplicate_names (List.map snd ds)
           (duplicate_parameter_error ~loc "procedura" f_id)
       in
-      let env' = Env.add f_id (FuncType (List.map fst ds, None)) Env.empty in
+      let env' = Env.add f_id (FuncType (List.map fst ds, None)) env in
       let env' = List.fold_left (fun acc (t, id) -> Env.add id t acc) env' ds in
       let* _, c_c = type_check_command env' c in
       let env = Env.add f_id (FuncType (List.map fst ds, None)) env in
@@ -332,7 +332,7 @@ and type_check_command env { it = c; at = loc } =
         check_duplicate_names (List.map snd ds)
           (duplicate_parameter_error ~loc "funzione" f_id)
       in
-      let env' = Env.add f_id (FuncType (List.map fst ds, Some t)) Env.empty in
+      let env' = Env.add f_id (FuncType (List.map fst ds, Some t)) env in
       let env' = List.fold_left (fun acc (t, id) -> Env.add id t acc) env' ds in
       let* t', c_e = type_check_expr env' e in
       if t = t' then

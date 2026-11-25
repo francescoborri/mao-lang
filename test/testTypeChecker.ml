@@ -93,10 +93,11 @@ let tests =
             "p(int x, int[] a) { a[0] := x; } p(1, [2]);";
             "p(int n) { if (n > 0) { p(n - 1); } }";
             "p() { skip; } p();";
+            "int g = 1; p(int x) { x := g; }";
           ];
         rejects
           [
-            "int g = 1; p(int x) { x := g; }";
+            "p(int x) { y := x; } int y;";
             "p(int x) { skip; } p(1, 2);";
             "p(int x) { skip; } p(true);";
             "p(int a, int a) { skip; }";
@@ -114,10 +115,11 @@ let tests =
             "int x = { int y = 2; return y + 1; };";
             "int f() 1 int x = f();";
             "int f() (true ? 1 : f())";
+            "int g = 1; int f(int x) x + g";
           ];
         rejects
           [
-            "int g = 1; int f(int x) x + g";
+            "int f(int x) x + g int g = 1;";
             "int f(int x) true";
             "int f(int a, bool a) 1";
             "int f(int x) x f(1);";

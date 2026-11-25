@@ -42,6 +42,74 @@ let rsr_log ~loc state event =
     error_with_loc ~loc "raggiunto il limite di %d passi" max_logs
   else { state; event } |> Loc.with_loc ~loc |> RSR.tell
 
+let free_if_unbound ds x =
+  if StringSet.mem x ds then StringSet.empty else StringSet.singleton x
+
+let union_map f =
+  List.fold_left (fun acc x -> StringSet.union acc (f x)) StringSet.empty
+
+let no_bindings free = (free, StringSet.empty)
+
+let rec free_vars_expr ds Loc.{ it = e } =
+  match e with
+  | CVal _ | CNewArrayLiteral _ -> StringSet.empty
+  | CVar x | CArrayLength x -> free_if_unbound ds x
+  | CArrayLoad (x, e) ->
+      StringSet.union (free_if_unbound ds x) (free_vars_expr ds e)
+  | CUnOp (_, e) | CNewArrayDefault (_, e) | CCast (_, e) -> free_vars_expr ds e
+  | CBinOp (e1, _, e2) -> union_map (free_vars_expr ds) [ e1; e2 ]
+  | CTernary (e1, e2, e3) -> union_map (free_vars_expr ds) [ e1; e2; e3 ]
+  | CCall (f, args) ->
+      StringSet.union (free_if_unbound ds f)
+        (union_map (free_vars_expr ds) args)
+  | CExprBlock (c, e) ->
+      let free_c, bound_c = free_vars_command ds c in
+      StringSet.union free_c (free_vars_expr (StringSet.union ds bound_c) e)
+
+and free_vars_command ds Loc.{ it = c } =
+  let def_scope id params =
+    StringSet.union ds (StringSet.of_list (id :: List.map snd params))
+  in
+  match c with
+  | CSkip -> no_bindings StringSet.empty
+  | CDeclare decls ->
+      ( union_map (snd >> free_vars_expr ds) decls,
+        decls |> List.map (fst >> snd) |> StringSet.of_list )
+  | CAssign assigns ->
+      assigns
+      |> union_map (fun (id, e) ->
+          StringSet.union (free_if_unbound ds id) (free_vars_expr ds e))
+      |> no_bindings
+  | CArrayStore (id, e1, e2) ->
+      StringSet.union (free_if_unbound ds id)
+        (union_map (free_vars_expr ds) [ e1; e2 ])
+      |> no_bindings
+  | CSeq (c1, c2) ->
+      let free1, bound1 = free_vars_command ds c1 in
+      let free2, bound2 = free_vars_command (StringSet.union ds bound1) c2 in
+      (StringSet.union free1 free2, StringSet.union bound1 bound2)
+  | CIfThenElse (e, c1, c2) ->
+      StringSet.union (free_vars_expr ds e)
+        (union_map (free_vars_command ds >> fst) [ c1; c2 ])
+      |> no_bindings
+  | CWhile (e, c) ->
+      StringSet.union (free_vars_expr ds e) (free_vars_command ds c |> fst)
+      |> no_bindings
+  | CBlock c -> free_vars_command ds c |> fst |> no_bindings
+  | CInvoke (id, args) ->
+      StringSet.union (free_if_unbound ds id)
+        (union_map (free_vars_expr ds) args)
+      |> no_bindings
+  | CProc (id, params, body) ->
+      ( free_vars_command (def_scope id params) body |> fst,
+        StringSet.singleton id )
+  | CFunc (id, params, body) ->
+      (free_vars_expr (def_scope id params) body, StringSet.singleton id)
+
+let capture c env =
+  let free, _ = free_vars_command StringSet.empty c in
+  Env.filter (fun id _ -> StringSet.mem id free) env
+
 let enter_call ~loc =
   let* { max_depth } = RSR.ask () in
   let* depth = RSR.enter_call () in
@@ -85,13 +153,13 @@ let store_var id v { env; mem } =
 
 let lookup_fun id env =
   match Env.find_opt id env with
-  | Some (LambdaFun (params, body)) -> (params, body)
+  | Some (LambdaFun (params, body, closure)) -> (params, body, closure)
   | Some (Addr _) | Some (LambdaProc _) -> expected_function_error id
   | None -> undefined_variable_error id
 
 let lookup_proc id env =
   match Env.find_opt id env with
-  | Some (LambdaProc (params, body)) -> (params, body)
+  | Some (LambdaProc (params, body, closure)) -> (params, body, closure)
   | Some (Addr _) | Some (LambdaFun _) -> expected_procedure_error id
   | None -> undefined_variable_error id
 
@@ -119,6 +187,9 @@ let bind_params ~loc params args =
     if List.is_empty params then CSkip else CDeclare (List.combine params args)
   in
   Loc.with_loc ~loc decls
+
+let with_closure closure s =
+  Env.union (fun _ _ binding -> Some binding) s.env closure |> set_env s
 
 let eval_bin_op Loc.{ it = v1 } op Loc.{ it = v2; at = v2_loc } =
   let module V = RTVal in
@@ -274,13 +345,13 @@ let rec eval_expr Loc.{ it = e; at = loc } s =
       RSR.ok (v, s.mem)
   | CExprBlock (c, e) -> eval_command c s >>= eval_expr e
   | CCall (id, args) ->
-      let params, body = lookup_fun id s.env in
+      let params, body, closure = lookup_fun id s.env in
       let decls = bind_params ~loc params args in
-      let e = Loc.with_loc ~loc (CExprBlock (decls, body)) in
       let* () = enter_call ~loc in
       let* call_id = RSR.incr_call_id () in
       let* () = rsr_log ~loc s (EBeginCall (id, call_id)) in
-      let* v, s = eval_expr e s =>> set_mem_snd s in
+      let e = Loc.with_loc ~loc (CExprBlock (decls, body)) in
+      let* v, s = eval_expr e (with_closure closure s) =>> set_mem_snd s in
       let* () = RSR.exit_call () in
       let* () = rsr_log ~loc s (EEndCall (id, call_id, v)) in
       RSR.ok (v, s.mem)
@@ -346,23 +417,26 @@ and eval_command (Loc.{ it = c; at = loc } as c_with_loc) s =
       else RSR.ok s
   | CBlock c -> eval_command c s =>> replace_mem s
   | CProc (id, ds, c) ->
-      let s = set_env s (Env.add id (LambdaProc (ds, c)) s.env) in
+      let closure = capture c_with_loc s.env in
+      let s = set_env s (Env.add id (LambdaProc (ds, c, closure)) s.env) in
       let* () = rsr_log ~loc s (EProc id) in
       RSR.ok s
   | CInvoke (id, args) ->
-      let params, body = lookup_proc id s.env in
+      let params, body, closure = lookup_proc id s.env in
       let decls = bind_params ~loc params args in
-      let body = Loc.with_loc ~loc (CSeq (decls, body)) in
-      let body = Loc.with_loc ~loc (CBlock body) in
       let* () = enter_call ~loc in
       let* call_id = RSR.incr_call_id () in
       let* () = rsr_log ~loc s (EBeginInvoke (id, call_id)) in
-      let* s = eval_command body s =>> replace_mem s in
+      let body =
+        Loc.with_loc ~loc (CBlock (Loc.with_loc ~loc (CSeq (decls, body))))
+      in
+      let* s = eval_command body (with_closure closure s) =>> replace_mem s in
       let* () = RSR.exit_call () in
       let* () = rsr_log ~loc s (EEndInvoke (id, call_id)) in
       RSR.ok s
   | CFunc (id, ds, e) ->
-      let s = Env.add id (LambdaFun (ds, e)) s.env |> set_env s in
+      let closure = capture c_with_loc s.env in
+      let s = Env.add id (LambdaFun (ds, e, closure)) s.env |> set_env s in
       let* () = rsr_log ~loc s (EFunc id) in
       RSR.ok s
 

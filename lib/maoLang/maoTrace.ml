@@ -167,9 +167,9 @@ let var_of_binding ({ mem } as s) (name, binding) =
           let preview = Fmt.str "%a" (pp_array_preview s) (name, arr_ptr) in
           var ~addr ~array:(arr_ptr, preview) ty (Fmt.str "%a" RTVal.pp v)
       | v -> var ~addr ty (Fmt.str "%a" RTVal.pp v))
-  | LambdaFun (params, _) ->
+  | LambdaFun (params, _, _) ->
       var "funzione" (Fmt.str "%a" pp_signature (name, params))
-  | LambdaProc (params, _) ->
+  | LambdaProc (params, _, _) ->
       var "procedura" (Fmt.str "%a" pp_signature (name, params))
 
 let var_of ~prev s (name, binding) =

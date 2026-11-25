@@ -102,10 +102,11 @@ module Mem = MemMap.Make (Int64Addr)
 
 type binding =
   | Addr of Int64Addr.t
-  | LambdaFun of typed_var list * checked_expr
-  | LambdaProc of typed_var list * checked_command
+  | LambdaFun of typed_var list * checked_expr * env
+  | LambdaProc of typed_var list * checked_command * env
 
-type env = binding Env.t
+and env = binding Env.t
+
 type mem = RTVal.t Mem.t
 type state = { env : env; mem : mem }
 

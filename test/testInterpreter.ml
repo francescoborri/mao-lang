@@ -120,6 +120,22 @@ let tests =
            n, int acc) (n <= 1 ? acc : h(n - 1, n * acc)) return h(n, 1); } \
            int a, b = f(10), g(10);"
           [ ("a", int 3628800); ("b", int 3628800) ]);
+    test "static scoping (a deliberate extension: closures)" (fun () ->
+        List.iter
+          (fun (src, expected) -> check_values src expected)
+          [
+            ( "int g = 1; int f() g int r = { int g = 2; return f(); };",
+              [ ("r", int 1) ] );
+            ("int g = 1; int f() g g := 5; int r = f();", [ ("r", int 5) ]);
+            ("int c = 0; p() { c := c + 1; } p(); p();", [ ("c", int 2) ]);
+            ( "int g = 1; int f() { int h() g return h(); } int r = f();",
+              [ ("r", int 1) ] );
+            ( "int k = 2; int f(int n) (n <= 0 ? k : f(n - 1)) int r = f(3);",
+              [ ("r", int 2) ] );
+            ( "int g = 1; p(int[] a) { a[0] := g; } int[] b = [0]; { int g = \
+               2; p(b); } int r = b[0];",
+              [ ("r", int 1) ] );
+          ]);
     test "logged events" (fun () ->
         Alcotest.(check (list string))
           "events"
